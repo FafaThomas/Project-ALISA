@@ -20,3 +20,18 @@ class SessionMemory:
 
     def clear(self):
         self.turns = []
+
+class Memory:
+    def __init__(self):
+        self.history = []
+
+    def add_message(self, role, content):
+        self.history.append({"role": role, "content": content})
+        # Keep it short for now — 10 last turns only
+        if len(self.history) > 10:
+            self.history = self.history[-10:]
+
+    def get_context(self):
+        return "\n".join(
+            [f"{msg['role'].capitalize()}: {msg['content']}" for msg in self.history]
+        )

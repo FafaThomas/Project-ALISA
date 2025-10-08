@@ -7,7 +7,8 @@ class BaseAgent:
         self.system_prompt = system_prompt
 
     def build_prompt(self, user_prompt: str, context: str = "") -> str:
-        return f"{self.system_prompt}\n{context}\nUser: {user_prompt}\n{self.name}:"
+        return f"{self.system_prompt}\n{context}\nUser: {user_prompt}\nALISA:"
+
 
     def respond(self, user_prompt: str, context: str, model_func):
         """Generic agent responder using a provided model function (e.g., ask_model)."""
