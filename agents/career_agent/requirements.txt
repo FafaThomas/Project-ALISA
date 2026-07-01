@@ -1,0 +1,97 @@
+# ==================================================
+# Career Agent - Requirements
+# ==================================================
+
+# -----------------------------
+# AI / LLM
+# -----------------------------
+langchain
+langgraph
+langchain-core
+langchain-community
+langchain-text-splitters
+langchain-ollama
+langchain-openai
+
+# -----------------------------
+# Embeddings / Vector Database
+# -----------------------------
+qdrant-client
+
+# -----------------------------
+# API
+# -----------------------------
+fastapi
+uvicorn[standard]
+
+# -----------------------------
+# Data Validation
+# -----------------------------
+pydantic
+pydantic-settings
+
+# -----------------------------
+# Database
+# -----------------------------
+sqlalchemy
+psycopg[binary]
+alembic
+
+# -----------------------------
+# Environment
+# -----------------------------
+python-dotenv
+
+# -----------------------------
+# Browser Automation
+# -----------------------------
+playwright
+
+# -----------------------------
+# HTTP
+# -----------------------------
+httpx
+requests
+
+# -----------------------------
+# HTML Parsing
+# -----------------------------
+beautifulsoup4
+lxml
+
+# -----------------------------
+# PDF Generation / Parsing
+# -----------------------------
+pypdf
+reportlab
+
+# -----------------------------
+# Resume / Office Documents
+# -----------------------------
+python-docx
+
+# -----------------------------
+# Utilities
+# -----------------------------
+tenacity
+rich
+tqdm
+
+# -----------------------------
+# Logging
+# -----------------------------
+loguru
+
+# -----------------------------
+# Testing
+# -----------------------------
+pytest
+pytest-asyncio
+
+# -----------------------------
+# Development
+# -----------------------------
+black
+isort
+flake8
+mypy
