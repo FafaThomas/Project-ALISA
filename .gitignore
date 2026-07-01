@@ -1,1 +1,54 @@
+# Documentation
 Documentation/
+
+# Python
+**/.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Environment
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# AI Models / Caches
+cache/
+models/
+checkpoints/
+
+# HuggingFace
+.huggingface/
+**/.cache/
+**/huggingface/
+
+# Whisper
+agents/**/cache/
+agents/**/models/
+
+# XTTS
+xtts_models/
+tts_models/
+
+# Vector Databases
+vector_db/
+chroma/
+qdrant_storage/
+faiss/
+
+# Temporary Files
+temp/
+tmp/
+
+# OS
+.DS_Store
+Thumbs.db
