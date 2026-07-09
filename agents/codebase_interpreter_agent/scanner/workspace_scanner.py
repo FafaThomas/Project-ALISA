@@ -5,34 +5,25 @@ IGNORE_DIRS = {
     ".git",
     ".venv",
     "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
     "node_modules",
     "build",
     "dist",
-    ".idea",
-    ".vscode",
 }
 
 
 class WorkspaceScanner:
 
-    def __init__(self, project_root: str | Path):
+    def scan(self, project_path: str | Path):
 
-        self.project_root = Path(project_root)
-
-    def discover_python_files(self) -> list[Path]:
+        project_path = Path(project_path)
 
         python_files = []
 
-        for path in self.project_root.rglob("*.py"):
+        for file in project_path.rglob("*.py"):
 
-            if any(
-                part in IGNORE_DIRS
-                for part in path.parts
-            ):
+            if any(part in IGNORE_DIRS for part in file.parts):
                 continue
 
-            python_files.append(path)
+            python_files.append(file)
 
         return sorted(python_files)
