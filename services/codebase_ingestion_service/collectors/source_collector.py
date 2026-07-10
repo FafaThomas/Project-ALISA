@@ -1,193 +1,148 @@
-from collections import Counter
 from pathlib import Path
 from datetime import datetime
 
-from models.source import SourceCollection, SourceDocument
-from utils.hashing import file_hash
+from models.source import (
+    SourceDocument,
+    SourceCollection,
+)
 
+from utils.hash import sha256_file
 
-SUPPORTED_EXTENSIONS = {
-
-    ".py",
-    ".cs",
-    ".java",
-    ".js",
-    ".ts",
-    ".cpp",
-    ".c",
-    ".hpp",
-    ".h",
-    ".go",
-    ".rs",
-    ".kt",
-    ".swift"
-
-}
-
-
-LANGUAGE_MAP = {
-
-    ".py": "python",
-    ".cs": "csharp",
-    ".java": "java",
-    ".js": "javascript",
-    ".ts": "typescript",
-    ".cpp": "cpp",
-    ".c": "c",
-    ".hpp": "cpp",
-    ".h": "c",
-    ".go": "go",
-    ".rs": "rust",
-    ".kt": "kotlin",
-    ".swift": "swift"
-
-}
-
-PARSER_MAP = {
-
-    "python": "python_ast",
-
-    "csharp": "roslyn",
-
-    "java": "javaparser",
-
-    "javascript": "tree_sitter",
-
-    "typescript": "tree_sitter",
-
-    "cpp": "tree_sitter",
-
-    "c": "tree_sitter",
-
-    "go": "tree_sitter",
-
-    "rust": "tree_sitter",
-
-    "kotlin": "tree_sitter",
-
-    "swift": "tree_sitter",
-
-}
 
 INTERPRETER_MAP = {
 
-    "python": "python",
+    ".py": "python",
+    ".cs": "dotnet",
+    ".cpp": "cpp",
+    ".c": "c",
+    ".h": "cpp",
+    ".hpp": "cpp",
 
-    "csharp": "csharp",
+    ".js": "node",
+    ".ts": "node",
+    ".tsx": "react",
+    ".jsx": "react",
 
-    "java": "java",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".swift": "swift",
+    ".go": "go",
+    ".rs": "rust",
+    ".php": "php",
 
-    "javascript": "javascript",
+    ".html": "browser",
+    ".css": "browser",
 
-    "typescript": "typescript",
-
-    "cpp": "cpp",
-
-    "c": "c",
-
-    "go": "go",
-
-    "rust": "rust",
-
-    "kotlin": "kotlin",
-
-    "swift": "swift",
+    ".sql": "sql",
 
 }
 
-
-IGNORE_DIRS = {
+IGNORE_DIRECTORIES = {
 
     ".git",
 
     ".venv",
 
-    "venv",
-
     "__pycache__",
 
     "node_modules",
 
-    "site-packages",
+    ".idea",
+
+    ".vscode",
+
+    "bin",
+
+    "obj",
+
+    "build",
+
+    "dist",
+
+    "storage",
+
+    "snapshots",
 
 }
 
-
 class SourceCollector:
 
-    def collect(self, workspace: Path) -> SourceCollection:
+    def collect(self, workspace) -> SourceCollection:
+
+        project = Path(workspace.path)
 
         files = []
 
-        language_counter = Counter()
+        languages = {}
 
-        for file in workspace.rglob("*"):
+        for file in project.rglob("*"):
 
             if not file.is_file():
-
                 continue
 
+            relative_path = file.relative_to(project)
+
             if any(
-                part.lower() in IGNORE_DIRS
-                for part in file.parts
+                part in IGNORE_DIRECTORIES
+                for part in relative_path.parts
             ):
                 continue
 
             suffix = file.suffix.lower()
 
-            if suffix not in SUPPORTED_EXTENSIONS:
-
+            if suffix not in INTERPRETER_MAP:
                 continue
 
-            language = LANGUAGE_MAP[suffix]
+            interpreter = INTERPRETER_MAP[suffix]
 
-            language_counter[language] += 1
+            language = suffix.lstrip(".")
 
-            stat = file.stat()
+            content = file.read_text(
 
-            raw_source = file.read_text(
                 encoding="utf-8",
-                errors="replace"
+
+                errors="ignore"
+
             )
 
-            relative_path = file.relative_to(workspace)
+            relative_path = file.relative_to(project).as_posix()
 
             files.append(
 
                 SourceDocument(
 
-                    path=file,
-
                     relative_path=relative_path,
 
                     extension=suffix,
 
+                    parser="generic",
+
+                    interpreter=interpreter,
+
                     language=language,
 
-                    parser=PARSER_MAP[language],
+                    size=file.stat().st_size,
 
-                    interpreter=INTERPRETER_MAP[language],
+                    modified=datetime.fromtimestamp(
+                        file.stat().st_mtime
+                    ),
 
-                    size=stat.st_size,
+                    hash=sha256_file(file),
 
-                    modified=datetime.fromtimestamp(stat.st_mtime),
-
-                    hash=file_hash(file),
-
-                    raw_source=raw_source
+                    raw_source=content,
 
                 )
 
             )
 
-        files.sort(key=lambda x: str(x.path))
+            languages[language] = languages.get(language, 0) + 1
 
         return SourceCollection(
 
             total_files=len(files),
 
-            languages=dict(language_counter),
+            languages=languages,
 
-            files=files
+            files=files,
 
         )

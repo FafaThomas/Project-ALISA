@@ -1,16 +1,24 @@
 from pathlib import Path
 
+from models.workspace import Workspace
+
 
 class WorkspaceCollector:
 
-    def collect(self, workspace: str | Path):
+    def collect(self, project_path: str | Path) -> Workspace:
 
-        workspace = Path(workspace)
+        project_path = Path(project_path).resolve()
 
-        print()
+        if not project_path.exists():
+            raise FileNotFoundError(project_path)
 
-        print("=" * 60)
-        print(workspace.name)
-        print("=" * 60)
+        if not project_path.is_dir():
+            raise NotADirectoryError(project_path)
 
-        return workspace
+        return Workspace(
+
+            name=project_path.name,
+
+            path=project_path,
+
+        )
