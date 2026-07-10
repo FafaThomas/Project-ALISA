@@ -1,11 +1,16 @@
 from pathlib import Path
 import json
 
+from parsers.parser_dispatcher import ParserDispatcher
+from models.parsed_document import ParsedDocument
+
 from collectors.workspace_collector import WorkspaceCollector
 from collectors.source_collector import SourceCollector
 from collectors.manifest_collector import ManifestCollector
 
 from models.project_context import ProjectContext
+
+from extractors.extractor_dispatcher import ExtractorDispatcher
 
 
 class CodebaseIngestionService:
@@ -18,6 +23,52 @@ class CodebaseIngestionService:
 
         self.manifest = ManifestCollector()
 
+        self.parser_dispatcher = ParserDispatcher()
+
+        self.extractor_dispatcher = ExtractorDispatcher()
+
+    def parse_sources(self, source_collection):
+
+        parsed_documents = []
+
+        for source in source_collection.files:
+
+            parser = self.parser_dispatcher.get_parser(source.parser)
+
+            parse_result = parser.parse(source)
+
+            extractor = self.extractor_dispatcher.get(source.parser)
+
+            symbols = []
+
+            if extractor and parse_result.tree is not None:
+
+                symbols = extractor.extract(parse_result.tree)
+
+            document = ParsedDocument(
+
+                relative_path=str(source.relative_path),
+
+                language=source.language,
+
+                parser=source.parser,
+
+                interpreter=source.interpreter,
+
+                symbols=symbols,
+
+                imports=[],
+
+                chunks=[],
+
+                metadata={}
+
+            )
+
+            parsed_documents.append(document)
+
+        return parsed_documents
+
     def create_project(self, project_path: str | Path):
 
         workspace = self.workspace.collect(project_path)
@@ -25,6 +76,22 @@ class CodebaseIngestionService:
         source_collection = self.source.collect(workspace)
 
         manifest_collection = self.manifest.collect(workspace)
+
+        parsed_documents = self.parse_sources(source_collection)
+
+        self.save_json(
+
+            "parsed_documents.json",
+
+            [
+
+                document.model_dump(mode="json")
+
+                for document in parsed_documents
+
+            ]
+
+        )
 
         context = ProjectContext(
 
@@ -50,9 +117,34 @@ class CodebaseIngestionService:
 
         print(f"Manifest Files    : {context.manifest_collection.total_documents}")
 
-        print()
+        print(f"Parsed Documents : {len(parsed_documents)}")
 
+        print()
         return context
+
+    def save_json(self, filename: str, data):
+
+        output = Path("output")
+
+        output.mkdir(exist_ok=True)
+
+        output_file = output / filename
+
+        output_file.write_text(
+
+            json.dumps(
+
+                data,
+
+                indent=4,
+
+                ensure_ascii=False,
+
+            ),
+
+            encoding="utf-8",
+
+        )
 
     def save_project_context(self, context: ProjectContext):
 

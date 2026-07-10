@@ -8,6 +8,33 @@ from models.source import (
 
 from utils.hash import sha256_file
 
+LANGUAGE_MAP = {
+
+    ".py": "python",
+    ".cs": "csharp",
+    ".cpp": "cpp",
+    ".c": "c",
+    ".h": "cpp",
+    ".hpp": "cpp",
+
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".jsx": "jsx",
+
+    ".java": "java",
+    ".go": "go",
+    ".kt": "kotlin",
+    ".rs": "rust",
+    ".swift": "swift",
+    ".php": "php",
+
+    ".sql": "sql",
+
+    ".html": "html",
+    ".css": "css",
+
+}
 
 INTERPRETER_MAP = {
 
@@ -35,6 +62,40 @@ INTERPRETER_MAP = {
 
     ".sql": "sql",
 
+}
+
+PARSER_MAP = {
+
+    ".py": "tree_sitter_python",
+
+    ".cs": "tree_sitter_c_sharp",
+
+    ".cpp": "tree_sitter_cpp",
+    ".c": "tree_sitter_c",
+
+    ".js": "tree_sitter_javascript",
+    ".ts": "tree_sitter_typescript",
+
+    ".tsx": "tree_sitter_tsx",
+    ".jsx": "tree_sitter_javascript",
+
+    ".java": "tree_sitter_java",
+
+    ".go": "tree_sitter_go",
+
+    ".rs": "tree_sitter_rust",
+
+    ".php": "tree_sitter_php",
+
+    ".swift": "tree_sitter_swift",
+
+    ".kt": "tree_sitter_kotlin",
+
+    ".html": "tree_sitter_html",
+
+    ".css": "tree_sitter_css",
+
+    ".sql": "tree_sitter_sql",
 }
 
 IGNORE_DIRECTORIES = {
@@ -95,7 +156,12 @@ class SourceCollector:
 
             interpreter = INTERPRETER_MAP[suffix]
 
-            language = suffix.lstrip(".")
+            parser = PARSER_MAP.get(
+                suffix,
+                "generic"
+            )
+
+            language = LANGUAGE_MAP[suffix]
 
             content = file.read_text(
 
@@ -115,7 +181,7 @@ class SourceCollector:
 
                     extension=suffix,
 
-                    parser="generic",
+                    parser=parser,
 
                     interpreter=interpreter,
 
