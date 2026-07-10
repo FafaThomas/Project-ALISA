@@ -11,6 +11,8 @@ from collectors.manifest_collector import ManifestCollector
 from models.project_context import ProjectContext
 
 from extractors.extractor_dispatcher import ExtractorDispatcher
+from extractors.python_import_extractor import PythonImportExtractor
+from extractors.chunk_dispatcher import ChunkDispatcher
 
 
 class CodebaseIngestionService:
@@ -26,6 +28,9 @@ class CodebaseIngestionService:
         self.parser_dispatcher = ParserDispatcher()
 
         self.extractor_dispatcher = ExtractorDispatcher()
+
+        self.chunk_dispatcher = ChunkDispatcher()
+
 
     def parse_sources(self, source_collection):
 
@@ -45,6 +50,24 @@ class CodebaseIngestionService:
 
                 symbols = extractor.extract(parse_result.tree)
 
+            imports = []
+
+            if parse_result.tree is not None:
+
+                import_extractor = PythonImportExtractor()
+
+                imports = import_extractor.extract(parse_result.tree)
+
+            chunks = []
+
+            if parse_result.tree is not None:
+
+                chunk_extractor = self.chunk_dispatcher.get(source.parser)
+
+                if chunk_extractor:
+
+                    chunks = chunk_extractor.extract(parse_result)
+
             document = ParsedDocument(
 
                 relative_path=str(source.relative_path),
@@ -57,9 +80,9 @@ class CodebaseIngestionService:
 
                 symbols=symbols,
 
-                imports=[],
+                imports=imports,
 
-                chunks=[],
+                chunks=chunks,
 
                 metadata={}
 
