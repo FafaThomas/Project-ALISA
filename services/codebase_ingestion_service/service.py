@@ -1,15 +1,13 @@
 from pathlib import Path
 import json
-
 from parsers.parser_dispatcher import ParserDispatcher
 from models.parsed_document import ParsedDocument
-
+from parsers.manifest_parser import ManifestParser
+from extractors.manifest_chunk_extractor import ManifestChunkExtractor
 from collectors.workspace_collector import WorkspaceCollector
 from collectors.source_collector import SourceCollector
 from collectors.manifest_collector import ManifestCollector
-
 from models.project_context import ProjectContext
-
 from extractors.extractor_dispatcher import ExtractorDispatcher
 from extractors.python_import_extractor import PythonImportExtractor
 from extractors.chunk_dispatcher import ChunkDispatcher
@@ -19,6 +17,7 @@ from resolvers.dependency_resolver import DependencyResolver
 from extractors.call_dispatcher import CallDispatcher
 from builders.call_graph_builder import CallGraphBuilder
 from resolvers.call_resolver import CallResolver
+from storage.vector_storage import VectorStorage
 
 class CodebaseIngestionService:
 
@@ -47,6 +46,8 @@ class CodebaseIngestionService:
         self.call_graph_builder = CallGraphBuilder()
 
         self.call_resolver = CallResolver()
+
+        self.vector_storage = VectorStorage()
 
 
     def parse_sources(self, source_collection):
@@ -129,6 +130,56 @@ class CodebaseIngestionService:
 
         return parsed_documents
 
+    def parse_manifests(
+        self,
+        manifest_collection,
+    ):
+
+        parsed_documents = []
+
+        parser = ManifestParser()
+
+        chunk_extractor = ManifestChunkExtractor()
+
+        for manifest in manifest_collection.documents:
+
+            parse_result = parser.parse(manifest)
+
+            chunks = chunk_extractor.extract(parse_result)
+
+            metadata = {
+
+                "document_type": manifest.document_type
+
+            }
+
+            document = ParsedDocument(
+
+                relative_path=manifest.relative_path,
+
+                language="manifest",
+
+                parser="manifest",
+
+                interpreter="",
+
+                symbols=[],
+
+                imports=[],
+
+                chunks=chunks,
+
+                metadata=metadata,
+
+                calls=[]
+
+            )
+
+            parsed_documents.append(document)
+
+        return parsed_documents
+
+
     def create_project(self, project_path: str | Path):
 
         workspace = self.workspace.collect(project_path)
@@ -138,6 +189,10 @@ class CodebaseIngestionService:
         manifest_collection = self.manifest.collect(workspace)
 
         parsed_documents = self.parse_sources(source_collection)
+
+        project_documents = self.parse_manifests(manifest_collection)
+
+        parsed_documents.extend(project_documents)
 
         dependency_graph = self.dependency_builder.build(parsed_documents)
 
@@ -182,6 +237,11 @@ class CodebaseIngestionService:
 
         self.save_project_context(context)
 
+        self.vector_storage.store(
+            project_name=workspace.name,
+            parsed_documents=parsed_documents,
+        )
+
         print()
 
         print("=" * 60)
@@ -197,6 +257,8 @@ class CodebaseIngestionService:
         print(f"Parsed Documents : {len(parsed_documents)}")
 
         print()
+
+        
         return context
 
     def save_json(self, filename: str, data):

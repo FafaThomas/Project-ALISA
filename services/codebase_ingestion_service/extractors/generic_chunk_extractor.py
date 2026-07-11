@@ -1,21 +1,35 @@
 from models.chunk import Chunk
 
-from extractors.base_chunk_extractor import BaseChunkExtractor
 
+class GenericChunkExtractor:
 
-class GenericChunkExtractor(BaseChunkExtractor):
+    def extract(
+        self,
+        parse_result,
+    ):
 
-    def extract(self, parse_result):
+        text = parse_result.source.raw_source
 
-        source = parse_result.source.raw_source
+        if not text.strip():
+            return []
 
         return [
+
             Chunk(
-                id="full_document",
+
+                id="0",
+
                 type="document",
+
                 name=str(parse_result.source.relative_path),
+
                 start_line=1,
-                end_line=len(source.splitlines()),
-                content=source,
+
+                end_line=len(
+                    text.splitlines()
+                ),
+
+                content=text,
             )
+
         ]
