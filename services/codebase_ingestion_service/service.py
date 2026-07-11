@@ -14,7 +14,10 @@ from extractors.extractor_dispatcher import ExtractorDispatcher
 from extractors.python_import_extractor import PythonImportExtractor
 from extractors.chunk_dispatcher import ChunkDispatcher
 from extractors.metadata_dispatcher import MetadataDispatcher
-
+from builders.dependency_graph_builder import DependencyGraphBuilder
+from resolvers.dependency_resolver import DependencyResolver
+from extractors.call_dispatcher import CallDispatcher
+from builders.call_graph_builder import CallGraphBuilder
 
 class CodebaseIngestionService:
 
@@ -33,6 +36,14 @@ class CodebaseIngestionService:
         self.chunk_dispatcher = ChunkDispatcher()
 
         self.metadata_dispatcher = MetadataDispatcher()
+
+        self.dependency_builder = DependencyGraphBuilder()
+
+        self.dependency_resolver = DependencyResolver()
+
+        self.call_dispatcher = CallDispatcher()
+
+        self.call_graph_builder = CallGraphBuilder()
 
 
     def parse_sources(self, source_collection):
@@ -79,6 +90,16 @@ class CodebaseIngestionService:
 
                 metadata = metadata_extractor.extract(parse_result)
 
+            calls = []
+
+            if parse_result.tree is not None:
+
+                call_extractor = self.call_dispatcher.get(source.parser)
+
+                if call_extractor:
+
+                    calls = call_extractor.extract(parse_result)
+
             document = ParsedDocument(
 
                 relative_path=str(source.relative_path),
@@ -95,7 +116,9 @@ class CodebaseIngestionService:
 
                 chunks=chunks,
 
-                metadata=metadata
+                metadata=metadata,
+
+                calls=calls
 
             )
 
@@ -113,18 +136,30 @@ class CodebaseIngestionService:
 
         parsed_documents = self.parse_sources(source_collection)
 
+        dependency_graph = self.dependency_builder.build(parsed_documents)
+
+        dependency_graph = self.dependency_resolver.resolve(
+            dependency_graph
+        )
+
+        call_graph = self.call_graph_builder.build(parsed_documents)
+
         self.save_json(
-
             "parsed_documents.json",
-
             [
-
                 document.model_dump(mode="json")
-
                 for document in parsed_documents
-
             ]
+        )
 
+        self.save_json(
+            "dependency_graph.json",
+            dependency_graph.model_dump(mode="json")
+        )
+
+        self.save_json(
+            "call_graph.json",
+            call_graph.model_dump(mode="json")
         )
 
         context = ProjectContext(
