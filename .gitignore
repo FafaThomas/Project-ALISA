@@ -98,3 +98,14 @@ Thumbs.db
 generated/
 output/
 artifacts/
+
+# =========================================
+# Generated Outputs
+# =========================================
+
+output/
+outputs/
+generated/
+artifacts/
+
+*.generated.json
