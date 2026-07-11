@@ -13,6 +13,7 @@ from models.project_context import ProjectContext
 from extractors.extractor_dispatcher import ExtractorDispatcher
 from extractors.python_import_extractor import PythonImportExtractor
 from extractors.chunk_dispatcher import ChunkDispatcher
+from extractors.metadata_dispatcher import MetadataDispatcher
 
 
 class CodebaseIngestionService:
@@ -30,6 +31,8 @@ class CodebaseIngestionService:
         self.extractor_dispatcher = ExtractorDispatcher()
 
         self.chunk_dispatcher = ChunkDispatcher()
+
+        self.metadata_dispatcher = MetadataDispatcher()
 
 
     def parse_sources(self, source_collection):
@@ -68,6 +71,14 @@ class CodebaseIngestionService:
 
                     chunks = chunk_extractor.extract(parse_result)
 
+            metadata = {}
+
+            metadata_extractor = self.metadata_dispatcher.get(source.parser)
+
+            if metadata_extractor:
+
+                metadata = metadata_extractor.extract(parse_result)
+
             document = ParsedDocument(
 
                 relative_path=str(source.relative_path),
@@ -84,7 +95,7 @@ class CodebaseIngestionService:
 
                 chunks=chunks,
 
-                metadata={}
+                metadata=metadata
 
             )
 
