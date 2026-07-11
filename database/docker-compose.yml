@@ -1,0 +1,67 @@
+name: ALISA
+
+services:
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: alisa-qdrant
+
+    restart: unless-stopped
+
+    ports:
+      - "${QDRANT_PORT}:6333"
+
+    volumes:
+      - ./qdrant/storage:/qdrant/storage
+
+    networks:
+      - alisa-network
+
+
+  postgres:
+    image: postgres:17
+    container_name: alisa-postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    ports:
+      - "${POSTGRES_PORT}:5432"
+
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+
+    networks:
+      - alisa-network
+
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: alisa-clickhouse
+
+    restart: unless-stopped
+
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT}:9000"
+
+    volumes:
+      - ./clickhouse/data:/var/lib/clickhouse
+
+    networks:
+      - alisa-network
+
+
+networks:
+
+  alisa-network:
+    driver: bridge

@@ -18,6 +18,7 @@ from builders.dependency_graph_builder import DependencyGraphBuilder
 from resolvers.dependency_resolver import DependencyResolver
 from extractors.call_dispatcher import CallDispatcher
 from builders.call_graph_builder import CallGraphBuilder
+from resolvers.call_resolver import CallResolver
 
 class CodebaseIngestionService:
 
@@ -44,6 +45,8 @@ class CodebaseIngestionService:
         self.call_dispatcher = CallDispatcher()
 
         self.call_graph_builder = CallGraphBuilder()
+
+        self.call_resolver = CallResolver()
 
 
     def parse_sources(self, source_collection):
@@ -143,6 +146,11 @@ class CodebaseIngestionService:
         )
 
         call_graph = self.call_graph_builder.build(parsed_documents)
+
+        call_graph = self.call_resolver.resolve(
+            call_graph,
+            parsed_documents
+        )
 
         self.save_json(
             "parsed_documents.json",

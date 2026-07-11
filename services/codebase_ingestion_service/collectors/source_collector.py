@@ -8,6 +8,8 @@ from models.source import (
 
 from utils.hash import sha256_file
 
+from utils.constants import EXCLUDED_PATHS
+
 LANGUAGE_MAP = {
 
     ".py": "python",
@@ -138,7 +140,20 @@ class SourceCollector:
 
         for file in project.rglob("*"):
 
-            if not file.is_file():
+            relative = file.relative_to(workspace.path).as_posix()
+
+            if any(
+                relative == path or relative.startswith(path + "/")
+                for path in EXCLUDED_PATHS
+            ):
+                continue
+
+            try:
+
+                if not file.is_file():
+                    continue
+
+            except OSError:
                 continue
 
             relative_path = file.relative_to(project)
