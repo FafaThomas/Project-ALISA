@@ -1,6 +1,6 @@
 from extractors.generic_chunk_extractor import GenericChunkExtractor
 from extractors.python_chunk_extractor import PythonChunkExtractor
-from extractors.sql_chunk_extractor import SQLChunkExtractor
+from extractors.postgresql_chunk_extractor import PostgreSQLChunkExtractor
 
 
 class ChunkDispatcher:
@@ -11,7 +11,7 @@ class ChunkDispatcher:
 
             "tree_sitter_python": PythonChunkExtractor(),
 
-            "tree_sitter_sql": SQLChunkExtractor(),
+            "tree_sitter_postgresql": PostgreSQLChunkExtractor(),
 
             "generic": GenericChunkExtractor(),
 

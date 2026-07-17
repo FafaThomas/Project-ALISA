@@ -1,7 +1,5 @@
 from tree_sitter import Parser
 
-from models.parse_result import ParseResult
-
 
 class TreeSitterParser:
 
@@ -10,13 +8,10 @@ class TreeSitterParser:
         self.parser = Parser()
         self.parser.language = language
 
-    def parse(self, source):
+    def parse_tree(self, source):
 
-        tree = self.parser.parse(
+        return self.parser.parse(
+
             bytes(source.raw_source, "utf-8")
-        )
 
-        return ParseResult(
-            source=source,
-            tree=tree
         )

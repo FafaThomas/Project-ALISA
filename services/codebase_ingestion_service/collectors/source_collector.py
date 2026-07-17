@@ -31,8 +31,6 @@ LANGUAGE_MAP = {
     ".swift": "swift",
     ".php": "php",
 
-    ".sql": "sql",
-
     ".html": "html",
     ".css": "css",
 
@@ -61,8 +59,6 @@ INTERPRETER_MAP = {
 
     ".html": "browser",
     ".css": "browser",
-
-    ".sql": "sql",
 
 }
 
@@ -96,8 +92,6 @@ PARSER_MAP = {
     ".html": "tree_sitter_html",
 
     ".css": "tree_sitter_css",
-
-    ".sql": "tree_sitter_sql",
 }
 
 IGNORE_DIRECTORIES = {

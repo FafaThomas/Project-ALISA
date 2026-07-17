@@ -2,50 +2,61 @@ from tree_sitter import Node
 
 from models.symbol import Symbol
 
-from extractors.base_extractor import BaseExtractor
+from extractors.tree_sitter_symbol_extractor import (
+    TreeSitterSymbolExtractor,
+)
 
 
-class PythonSymbolExtractor(BaseExtractor):
+class PythonSymbolExtractor(
+    TreeSitterSymbolExtractor
+):
 
-    def extract(self, tree):
+    def is_symbol(
+        self,
+        node: Node,
+    ):
 
-        symbols = []
+        return node.type in {
 
-        self.walk(tree.root_node, symbols)
+            "function_definition",
 
-        return symbols
+            "class_definition",
 
-    def walk(self, node: Node, symbols):
+        }
 
-        if node.type == "function_definition":
+    def create_symbol(
+        self,
+        node: Node,
+    ):
 
-            name_node = node.child_by_field_name("name")
+        name_node = node.child_by_field_name(
+            "name"
+        )
 
-            if name_node:
+        if not name_node:
 
-                symbols.append(
-                    Symbol(
-                        name=name_node.text.decode(),
-                        kind="function",
-                        start_line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                    )
-                )
+            return None
 
-        elif node.type == "class_definition":
+        name = name_node.text.decode()
 
-            name_node = node.child_by_field_name("name")
+        kind = {
 
-            if name_node:
+            "function_definition": "function",
 
-                symbols.append(
-                    Symbol(
-                        name=name_node.text.decode(),
-                        kind="class",
-                        start_line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                    )
-                )
+            "class_definition": "class",
 
-        for child in node.children:
-            self.walk(child, symbols)
+        }[node.type]
+
+        return Symbol(
+
+            name=name,
+
+            qualified_name="",
+
+            kind=kind,
+
+            start_line=node.start_point[0] + 1,
+
+            end_line=node.end_point[0] + 1,
+
+        )

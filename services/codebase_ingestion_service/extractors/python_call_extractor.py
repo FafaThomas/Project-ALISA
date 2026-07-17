@@ -1,63 +1,69 @@
 from tree_sitter import Node
 
-from extractors.base_call_extractor import BaseCallExtractor
-
 from models.call import Call
 
+from extractors.tree_sitter_call_extractor import (
+    TreeSitterCallExtractor,
+)
 
-class PythonCallExtractor(BaseCallExtractor):
 
-    def extract(self, parse_result):
+class PythonCallExtractor(
+    TreeSitterCallExtractor
+):
 
-        self.source = parse_result.source.raw_source
-
-        calls = []
-
-        self.walk(
-            parse_result.tree.root_node,
-            None,
-            calls
-        )
-
-        return calls
-
-    def walk(
+    def is_scope(
         self,
         node: Node,
-        current_function,
-        calls
     ):
 
-        if node.type == "function_definition":
+        return node.type == "function_definition"
 
-            name = node.child_by_field_name("name")
+    def get_scope_name(
+        self,
+        node: Node,
+    ):
 
-            current_function = self.text(name)
+        name = node.child_by_field_name(
+            "name"
+        )
 
-        elif node.type == "call":
+        if not name:
 
-            func = node.child_by_field_name("function")
+            return None
 
-            if current_function and func:
+        return self.text(name)
 
-                calls.append(
-                    Call(
-                        caller=current_function,
-                        callee=self.text(func),
-                        line=node.start_point[0] + 1
-                    )
-                )
+    def is_call(
+        self,
+        node: Node,
+    ):
 
-        for child in node.children:
+        return node.type == "call"
 
-            self.walk(
-                child,
-                current_function,
-                calls
-            )
+    def create_call(
+        self,
+        node: Node,
+        current_scope,
+    ):
 
-    def text(self, node):
+        if not current_scope:
 
-        return self.source[
-            node.start_byte:node.end_byte
-        ]
+            return None
+
+        func = node.child_by_field_name(
+            "function"
+        )
+
+        if not func:
+
+            return None
+
+        return Call(
+
+            caller=current_scope,
+
+            callee=self.text(func),
+
+            line=node.start_point[0] + 1,
+
+        )

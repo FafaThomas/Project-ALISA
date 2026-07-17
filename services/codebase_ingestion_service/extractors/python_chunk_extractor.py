@@ -1,65 +1,70 @@
+from tree_sitter import Node
+
 from models.chunk import Chunk
 
-from extractors.base_chunk_extractor import BaseChunkExtractor
+from extractors.tree_sitter_chunk_extractor import (
+    TreeSitterChunkExtractor,
+)
 
 
-class PythonChunkExtractor(BaseChunkExtractor):
+class PythonChunkExtractor(
+    TreeSitterChunkExtractor
+):
 
-    def extract(self, parse_result):
+    def is_chunk(
+        self,
+        node: Node,
+    ):
 
-        source = parse_result.source.raw_source
-
-        lines = source.splitlines()
-
-        chunks = []
-
-        root = parse_result.tree.root_node
-
-        self.walk(root, lines, chunks)
-
-        return chunks
-
-    def walk(self, node, lines, chunks):
-
-        if node.type in {
+        return node.type in {
 
             "function_definition",
 
             "class_definition",
 
-        }:
+        }
 
-            start = node.start_point[0] + 1
+    def create_chunk(
+        self,
+        node: Node,
+        lines,
+    ):
 
-            end = node.end_point[0] + 1
+        start = node.start_point[0] + 1
 
-            text = "\n".join(lines[start - 1:end])
+        end = node.end_point[0] + 1
 
-            name = self.extract_name(node)
+        text = "\n".join(
+            lines[start - 1:end]
+        )
 
-            chunks.append(
+        return Chunk(
 
-                Chunk(
-                    id=f"{start}:{end}",
-                    type=node.type,
-                    name=name,
-                    start_line=start,
-                    end_line=end,
-                    content=text,
-                )
+            id=f"{start}:{end}",
 
-            )
+            type=node.type,
 
-        for child in node.children:
+            name=self.extract_name(node),
 
-            self.walk(child, lines, chunks)
+            start_line=start,
 
-    def extract_name(self, node):
+            end_line=end,
 
-        for child in node.children:
+            content=text,
 
-            if child.type == "identifier":
+        )
 
-                return child.text.decode()
+    def extract_name(
+        self,
+        node: Node,
+    ):
+
+        name_node = node.child_by_field_name(
+            "name"
+        )
+
+        if name_node:
+
+            return name_node.text.decode()
 
         return None

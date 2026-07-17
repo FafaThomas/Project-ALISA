@@ -1,6 +1,6 @@
 from extractors.generic_chunk_extractor import GenericChunkExtractor
 
 
-class SQLChunkExtractor(GenericChunkExtractor):
+class PostgreSQLChunkExtractor(GenericChunkExtractor):
 
     pass
