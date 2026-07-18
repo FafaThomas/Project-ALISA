@@ -1,7 +1,7 @@
 from pathlib import Path
 from datetime import datetime
 
-from models.sql import (
+from sql.models.sql import (
     SQLDocument,
     SQLCollection,
 )

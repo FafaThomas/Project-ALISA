@@ -11,6 +11,9 @@ from collectors.sql_collector import SQLCollector
 from sql.scanners.sql_scanner import SQLScanner
 from sql.parsers.parser_dispatcher import SQLParserDispatcher
 from sql.builders.parsed_document_builder import ParsedDocumentBuilder
+from sql.extractors.symbol_extractor import SQLSymbolExtractor
+from sql.extractors.chunk_extractor import SQLChunkExtractor
+from sql.extractors.metadata_extractor import SQLMetadataExtractor
 from models.project_context import ProjectContext
 from extractors.extractor_dispatcher import ExtractorDispatcher
 from extractors.python_import_extractor import PythonImportExtractor
@@ -40,6 +43,12 @@ class CodebaseIngestionService:
         self.sql_parser_dispatcher = SQLParserDispatcher()
 
         self.sql_parsed_document_builder = ParsedDocumentBuilder()
+
+        self.sql_symbol_extractor = SQLSymbolExtractor()
+
+        self.sql_chunk_extractor = SQLChunkExtractor()
+
+        self.sql_metadata_extractor = SQLMetadataExtractor()
 
         self.parser_dispatcher = ParserDispatcher()
 
@@ -195,6 +204,20 @@ class CodebaseIngestionService:
 
         sql_collection = self.sql_scanner.scan(sql_collection)
 
+        for document in sql_collection.documents:
+
+                print()
+
+                print(document.relative_path)
+
+                print(f"Dialect    : {document.dialect}")
+
+                print(f"Parser     : {document.parser}")
+
+                print(f"Confidence : {document.confidence}")
+
+                print(f"Evidence   : {document.evidence}")
+
         parsed_documents = []
 
         for document in sql_collection.documents:
@@ -205,11 +228,33 @@ class CodebaseIngestionService:
 
             parse_result = parser.parse(document)
 
+            symbols = []
+            chunks = []
+            metadata = {}
+
+            if parse_result.tree is not None:
+
+                symbols = self.sql_symbol_extractor.extract(parse_result)
+
+                chunks = self.sql_chunk_extractor.extract(parse_result)
+
+                metadata = self.sql_metadata_extractor.extract(parse_result)
+
             parsed_document = self.sql_parsed_document_builder.build(
-                parse_result
+                parse_result,
+                symbols,
+                chunks,
+                metadata,
             )
 
             parsed_documents.append(parsed_document)
+
+            print()
+            print("=" * 60)
+            print("SQL DETECTION")
+            print("=" * 60)
+
+            
 
         return parsed_documents
 

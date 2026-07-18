@@ -3,7 +3,13 @@ from models.parsed_document import ParsedDocument
 
 class ParsedDocumentBuilder:
 
-    def build(self, parse_result):
+    def build(
+        self,
+        parse_result,
+        symbols,
+        chunks,
+        metadata,
+    ):
 
         document = parse_result.document
 
@@ -17,14 +23,13 @@ class ParsedDocumentBuilder:
 
             interpreter=document.dialect,
 
-            symbols=[],
+            symbols=symbols,
 
             imports=[],
 
-            chunks=[],
+            chunks=chunks,
 
-            metadata={},
+            metadata=metadata,
 
             calls=[],
-
         )

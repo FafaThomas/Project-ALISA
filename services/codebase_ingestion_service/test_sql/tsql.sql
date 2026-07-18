@@ -1,0 +1,15 @@
+CREATE TABLE Employees
+(
+    EmployeeID INT IDENTITY(1,1) PRIMARY KEY,
+    Name NVARCHAR(100),
+    Salary MONEY
+);
+GO
+
+CREATE PROCEDURE GetEmployees
+AS
+BEGIN
+    SELECT TOP 10 *
+    FROM Employees;
+END;
+GO

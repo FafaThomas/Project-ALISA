@@ -4,7 +4,7 @@ from sql.models.sql_detection import SQLDetectionResult
 from .base_detector import BaseDetector
 
 
-class TSQLDetector(BaseDetector):
+class OracleDetector(BaseDetector):
 
     def detect(self, document):
 
@@ -17,17 +17,15 @@ class TSQLDetector(BaseDetector):
 
         keywords = {
 
-            "IDENTITY":5,
+            "VARCHAR2":5,
 
-            "GO":5,
+            "NUMBER":4,
 
-            "TOP":4,
+            "PACKAGE":5,
 
-            "NVARCHAR":3,
+            "CREATE OR REPLACE":5,
 
-            "TRY_CONVERT":3,
-
-            "MERGE":2,
+            "SEQUENCE":2,
 
         }
 
@@ -46,9 +44,9 @@ class TSQLDetector(BaseDetector):
 
         return SQLDetectionResult(
 
-            parser="tsql",
+            parser="oracle",
 
-            dialect=SQLDialect.MSSQL,
+            dialect=SQLDialect.ORACLE,
 
             confidence=len(evidence),
 

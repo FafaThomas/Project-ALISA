@@ -1,0 +1,17 @@
+CREATE TABLE employees
+(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100),
+    salary DECIMAL(10,2)
+);
+
+DELIMITER $$
+
+CREATE PROCEDURE GetEmployees()
+BEGIN
+    SELECT *
+    FROM employees
+    LIMIT 10;
+END $$
+
+DELIMITER ;

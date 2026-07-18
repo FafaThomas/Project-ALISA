@@ -1,5 +1,4 @@
 from parsers.python_parser import PythonParser
-from parsers.postgresql_parser import PostgreSQLParser
 from parsers.csharp_parser import CSharpParser
 from parsers.generic_parser import GenericParser
 
@@ -11,8 +10,6 @@ class ParserDispatcher:
         self.parsers = {
 
             "tree_sitter_python": PythonParser(),
-
-            "tree_sitter_postgresql": PostgreSQLParser(),
 
             "tree_sitter_c_sharp": CSharpParser(),
 

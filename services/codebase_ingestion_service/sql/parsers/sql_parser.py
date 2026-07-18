@@ -1,5 +1,18 @@
-class SQLParser:
+from abc import ABC, abstractmethod
 
-    def parse(self, document):
 
-        ...
+class SQLParser(ABC):
+
+    @abstractmethod
+
+    def parse(
+
+        self,
+
+        document,
+
+        detection,
+
+    ):
+
+        pass

@@ -1,0 +1,13 @@
+CREATE PROCEDURE GetUsers
+
+AS
+
+BEGIN
+
+    SELECT *
+
+    FROM Users;
+
+END
+
+GO

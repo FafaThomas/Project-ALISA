@@ -2,7 +2,7 @@ from tree_sitter import Language
 import tree_sitter_sql
 
 from parsers.tree_sitter_parser import TreeSitterParser
-from models.sql_parse_result import SQLParseResult
+from sql.models.sql_parse_result import SQLParseResult
 
 
 class TreeSitterSQLParser(TreeSitterParser):
@@ -24,5 +24,11 @@ class TreeSitterSQLParser(TreeSitterParser):
             document=document,
 
             tree=tree,
+
+            dialect=document.dialect,
+
+            confidence=document.confidence,
+
+            evidence=document.evidence,
 
         )

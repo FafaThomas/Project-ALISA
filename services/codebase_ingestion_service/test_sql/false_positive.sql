@@ -1,0 +1,8 @@
+CREATE TABLE test
+(
+    id SERIAL PRIMARY KEY,
+    name NVARCHAR(100)
+);
+
+SELECT TOP 5 *
+FROM test;

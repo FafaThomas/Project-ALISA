@@ -1,0 +1,13 @@
+CREATE TABLE employees
+(
+    id NUMBER PRIMARY KEY,
+    name VARCHAR2(100),
+    salary NUMBER
+);
+
+CREATE OR REPLACE PROCEDURE GetEmployees
+AS
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Hello');
+END;
+/
