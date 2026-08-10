@@ -1,6 +1,8 @@
 from extractors.python_import_extractor import PythonImportExtractor
 from extractors.csharp_import_extractor import CSharpImportExtractor
 from extractors.javascript_import_extractor import JavaScriptImportExtractor
+from extractors.html_import_extractor import HTMLImportExtractor
+from extractors.css_import_extractor import CSSImportExtractor
 
 class ImportDispatcher:
 
@@ -16,6 +18,12 @@ class ImportDispatcher:
 
             "tree_sitter_javascript":
                 JavaScriptImportExtractor(),
+
+            "tree_sitter_html":
+                HTMLImportExtractor(),
+
+            "tree_sitter_css":
+                CSSImportExtractor(),
 
         }
 

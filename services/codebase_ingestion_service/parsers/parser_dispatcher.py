@@ -2,6 +2,9 @@ from parsers.python_parser import PythonParser
 from parsers.csharp_parser import CSharpParser
 from parsers.generic_parser import GenericParser
 from parsers.javascript_parser import JavaScriptParser
+from parsers.html_parser import HTMLParser
+from parsers.css_parser import CSSParser
+
 
 
 class ParserDispatcher:
@@ -18,6 +21,12 @@ class ParserDispatcher:
 
             "tree_sitter_javascript":
                 JavaScriptParser(),
+
+            "tree_sitter_html":
+                HTMLParser(),
+
+            "tree_sitter_css":
+                CSSParser(),
 
             "generic":
                 GenericParser(),
