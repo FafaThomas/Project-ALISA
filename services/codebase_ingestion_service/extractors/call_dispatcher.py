@@ -1,7 +1,7 @@
 from extractors.python_call_extractor import PythonCallExtractor
 from extractors.csharp_call_extractor import CSharpCallExtractor
 from extractors.base_call_extractor import BaseCallExtractor
-
+from extractors.javascript_call_extractor import JavaScriptCallExtractor
 
 class CallDispatcher:
 
@@ -14,6 +14,9 @@ class CallDispatcher:
 
             "tree_sitter_c_sharp":
                 CSharpCallExtractor(),
+
+            "tree_sitter_javascript":
+                JavaScriptCallExtractor(),
 
         }
 

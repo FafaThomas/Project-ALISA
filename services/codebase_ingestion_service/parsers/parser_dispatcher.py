@@ -1,6 +1,7 @@
 from parsers.python_parser import PythonParser
 from parsers.csharp_parser import CSharpParser
 from parsers.generic_parser import GenericParser
+from parsers.javascript_parser import JavaScriptParser
 
 
 class ParserDispatcher:
@@ -9,11 +10,17 @@ class ParserDispatcher:
 
         self.parsers = {
 
-            "tree_sitter_python": PythonParser(),
+            "tree_sitter_python":
+                PythonParser(),
 
-            "tree_sitter_c_sharp": CSharpParser(),
+            "tree_sitter_c_sharp":
+                CSharpParser(),
 
-            "generic": GenericParser(),
+            "tree_sitter_javascript":
+                JavaScriptParser(),
+
+            "generic":
+                GenericParser(),
 
         }
 

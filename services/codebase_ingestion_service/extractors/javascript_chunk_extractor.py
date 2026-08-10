@@ -7,7 +7,7 @@ from extractors.tree_sitter_chunk_extractor import (
 )
 
 
-class CSharpChunkExtractor(
+class JavaScriptChunkExtractor(
     TreeSitterChunkExtractor
 ):
 
@@ -18,19 +18,15 @@ class CSharpChunkExtractor(
 
         return node.type in {
 
+            "function_declaration",
+
+            "function_expression",
+
+            "arrow_function",
+
             "class_declaration",
 
-            "struct_declaration",
-
-            "interface_declaration",
-
-            "enum_declaration",
-
-            "method_declaration",
-
-            "constructor_declaration",
-
-            "property_declaration",
+            "method_definition",
 
         }
 
@@ -53,15 +49,9 @@ class CSharpChunkExtractor(
         )
 
         name = (
-
-            name_node.text.decode(
-                "utf-8"
-            )
-
+            name_node.text.decode()
             if name_node
-
             else None
-
         )
 
         return Chunk(

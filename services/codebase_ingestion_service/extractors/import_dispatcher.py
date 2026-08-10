@@ -1,6 +1,6 @@
 from extractors.python_import_extractor import PythonImportExtractor
 from extractors.csharp_import_extractor import CSharpImportExtractor
-
+from extractors.javascript_import_extractor import JavaScriptImportExtractor
 
 class ImportDispatcher:
 
@@ -13,6 +13,9 @@ class ImportDispatcher:
 
             "tree_sitter_c_sharp":
                 CSharpImportExtractor(),
+
+            "tree_sitter_javascript":
+                JavaScriptImportExtractor(),
 
         }
 

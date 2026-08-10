@@ -1,7 +1,7 @@
 from service import CodebaseIngestionService
 
 
-PROJECT = r"D:\Organized Projects\For Portfolio\Aether"
+PROJECT = r"D:\Organized Projects\For Personal\Test_Frontend"
 
 ingestion = CodebaseIngestionService()
 
