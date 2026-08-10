@@ -10,13 +10,13 @@ from collectors.manifest_collector import ManifestCollector
 from collectors.sql_collector import SQLCollector
 from sql.scanners.sql_scanner import SQLScanner
 from sql.parsers.parser_dispatcher import SQLParserDispatcher
+from extractors.import_dispatcher import ImportDispatcher
 from sql.builders.parsed_document_builder import ParsedDocumentBuilder
 from sql.extractors.symbol_extractor import SQLSymbolExtractor
 from sql.extractors.chunk_extractor import SQLChunkExtractor
 from sql.extractors.metadata_extractor import SQLMetadataExtractor
 from models.project_context import ProjectContext
 from extractors.extractor_dispatcher import ExtractorDispatcher
-from extractors.python_import_extractor import PythonImportExtractor
 from extractors.chunk_dispatcher import ChunkDispatcher
 from extractors.metadata_dispatcher import MetadataDispatcher
 from builders.dependency_graph_builder import DependencyGraphBuilder
@@ -58,6 +58,8 @@ class CodebaseIngestionService:
 
         self.metadata_dispatcher = MetadataDispatcher()
 
+        self.import_dispatcher = ImportDispatcher()
+
         self.dependency_builder = DependencyGraphBuilder()
 
         self.dependency_resolver = DependencyResolver()
@@ -93,9 +95,15 @@ class CodebaseIngestionService:
 
             if parse_result.tree is not None:
 
-                import_extractor = PythonImportExtractor()
+                import_extractor = self.import_dispatcher.get(
+                    source.parser
+                )
 
-                imports = import_extractor.extract(parse_result.tree)
+                if import_extractor:
+
+                    imports = import_extractor.extract(
+                        parse_result.tree
+                    )
 
             chunks = []
 

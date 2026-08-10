@@ -42,6 +42,8 @@ class CSharpSymbolExtractor(BaseExtractor):
 
                     name=name_node.text.decode(),
 
+                    qualified_name="",
+
                     kind="namespace",
 
                     start_line=node.start_point[0] + 1,
@@ -65,6 +67,8 @@ class CSharpSymbolExtractor(BaseExtractor):
                 symbol = Symbol(
 
                     name=name_node.text.decode(),
+
+                    qualified_name="",
 
                     kind="class",
 
@@ -90,6 +94,8 @@ class CSharpSymbolExtractor(BaseExtractor):
 
                     name=name_node.text.decode(),
 
+                    qualified_name="",
+
                     kind="record",
 
                     start_line=node.start_point[0] + 1,
@@ -113,6 +119,8 @@ class CSharpSymbolExtractor(BaseExtractor):
                 symbol = Symbol(
 
                     name=name_node.text.decode(),
+
+                    qualified_name="",
 
                     kind="struct",
 
@@ -138,6 +146,8 @@ class CSharpSymbolExtractor(BaseExtractor):
 
                     name=name_node.text.decode(),
 
+                    qualified_name="",
+
                     kind="interface",
 
                     start_line=node.start_point[0] + 1,
@@ -161,6 +171,8 @@ class CSharpSymbolExtractor(BaseExtractor):
                 symbol = Symbol(
 
                     name=name_node.text.decode(),
+
+                    qualified_name="",
 
                     kind="enum",
 
@@ -186,6 +198,8 @@ class CSharpSymbolExtractor(BaseExtractor):
 
                     name=name_node.text.decode(),
 
+                    qualified_name="",
+
                     kind="constructor",
 
                     start_line=node.start_point[0] + 1,
@@ -210,6 +224,8 @@ class CSharpSymbolExtractor(BaseExtractor):
 
                     name=name_node.text.decode(),
 
+                    qualified_name="",
+
                     kind="method",
 
                     start_line=node.start_point[0] + 1,
@@ -233,6 +249,8 @@ class CSharpSymbolExtractor(BaseExtractor):
                 symbol = Symbol(
 
                     name=name_node.text.decode(),
+
+                    qualified_name="",
 
                     kind="property",
 
@@ -261,6 +279,8 @@ class CSharpSymbolExtractor(BaseExtractor):
                     symbol = Symbol(
 
                         name=name_node.text.decode(),
+
+                        qualified_name="",
 
                         kind="field",
 
