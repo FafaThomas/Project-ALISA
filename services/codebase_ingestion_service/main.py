@@ -1,7 +1,7 @@
 from service import CodebaseIngestionService
 
 
-PROJECT = r"C:\Users\tdecl\Downloads\ICTI_Website-main\ICTI_Website-main"
+PROJECT = r"D:\Organized Projects\For Portfolio\Project-ALISA"
 
 ingestion = CodebaseIngestionService()
 

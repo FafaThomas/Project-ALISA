@@ -11,6 +11,8 @@ class PythonChunkExtractor(
     TreeSitterChunkExtractor
 ):
 
+    MAX_CLASS_CHARS = 12000
+
     def is_chunk(
         self,
         node: Node,
@@ -38,6 +40,15 @@ class PythonChunkExtractor(
             lines[start - 1:end]
         )
 
+        if (
+            node.type == "class_definition"
+            and len(text) > self.MAX_CLASS_CHARS
+        ):
+
+            text = self.create_class_summary(
+                node,
+            )
+
         return Chunk(
 
             id=f"{start}:{end}",
@@ -54,6 +65,52 @@ class PythonChunkExtractor(
 
         )
 
+    def create_class_summary(
+        self,
+        node: Node,
+    ):
+
+        name = self.extract_name(
+            node,
+        )
+
+        summary = [
+
+            f"class {name}",
+
+            "",
+
+            "Methods:",
+
+        ]
+
+        for child in node.children:
+
+            if child.type == "function_definition":
+
+                method_name = self.extract_name(
+                    child,
+                )
+
+                start = (
+                    child.start_point[0] + 1
+                )
+
+                end = (
+                    child.end_point[0] + 1
+                )
+
+                summary.append(
+
+                    f"- {method_name} "
+                    f"(lines {start}-{end})"
+
+                )
+
+        return "\n".join(
+            summary
+        )
+
     def extract_name(
         self,
         node: Node,
@@ -68,3 +125,4 @@ class PythonChunkExtractor(
             return name_node.text.decode()
 
         return None
+

@@ -11,24 +11,26 @@ class JavaScriptChunkExtractor(
     TreeSitterChunkExtractor
 ):
 
+    MAX_TYPE_CHARS = 6000
+
+    TYPE_NODES = {
+        "class_declaration",
+    }
+
+    CHUNK_NODES = {
+        "function_declaration",
+        "function_expression",
+        "arrow_function",
+        "class_declaration",
+        "method_definition",
+    }
+
     def is_chunk(
         self,
         node: Node,
     ):
 
-        return node.type in {
-
-            "function_declaration",
-
-            "function_expression",
-
-            "arrow_function",
-
-            "class_declaration",
-
-            "method_definition",
-
-        }
+        return node.type in self.CHUNK_NODES
 
     def create_chunk(
         self,
@@ -44,15 +46,17 @@ class JavaScriptChunkExtractor(
             lines[start - 1:end]
         )
 
-        name_node = node.child_by_field_name(
-            "name"
-        )
+        if not text.strip():
+            return None
 
-        name = (
-            name_node.text.decode()
-            if name_node
-            else None
-        )
+        if (
+            node.type in self.TYPE_NODES
+            and len(text) > self.MAX_TYPE_CHARS
+        ):
+
+            text = self.create_class_summary(
+                node
+            )
 
         return Chunk(
 
@@ -60,7 +64,9 @@ class JavaScriptChunkExtractor(
 
             type=node.type,
 
-            name=name,
+            name=self.extract_name(
+                node
+            ),
 
             start_line=start,
 
@@ -69,3 +75,93 @@ class JavaScriptChunkExtractor(
             content=text,
 
         )
+
+    def create_class_summary(
+        self,
+        node: Node,
+    ):
+
+        name = self.extract_name(
+            node
+        )
+
+        summary = [
+
+            f"class: {name}",
+
+            "",
+
+            "Members:",
+
+        ]
+
+        for child in node.children:
+
+            if child.type in {
+                "method_definition",
+                "field_definition",
+                "class_declaration",
+            }:
+
+                member_name = (
+                    self.extract_name(
+                        child
+                    )
+                )
+
+                start = (
+                    child.start_point[0] + 1
+                )
+
+                end = (
+                    child.end_point[0] + 1
+                )
+
+                summary.append(
+
+                    f"- {member_name or child.type} "
+                    f"({child.type}, "
+                    f"lines {start}-{end})"
+
+                )
+
+        return "\n".join(
+            summary
+        )
+
+    def extract_name(
+        self,
+        node: Node,
+    ):
+
+        name_node = node.child_by_field_name(
+            "name"
+        )
+
+        if name_node:
+
+            return name_node.text.decode(
+                "utf-8"
+            )
+
+        if node.type == "arrow_function":
+
+            parent = node.parent
+
+            if parent:
+
+                if parent.type == "variable_declarator":
+
+                    name_node = (
+                        parent.child_by_field_name(
+                            "name"
+                        )
+                    )
+
+                    if name_node:
+
+                        return name_node.text.decode(
+                            "utf-8"
+                        )
+
+        return None

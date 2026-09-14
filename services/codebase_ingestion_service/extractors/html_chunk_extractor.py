@@ -11,15 +11,24 @@ class HTMLChunkExtractor(
     TreeSitterChunkExtractor
 ):
 
+    HTML_CHUNK_NODES = {
+        "script_element",
+        "style_element",
+        "form_element",
+        "nav_element",
+        "header_element",
+        "footer_element",
+        "main_element",
+        "section_element",
+        "article_element",
+    }
+
     def is_chunk(
         self,
         node: Node,
     ):
 
-        return node.type in {
-            "script_element",
-            "style_element",
-        }
+        return node.type in self.HTML_CHUNK_NODES
 
     def create_chunk(
         self,
@@ -35,17 +44,8 @@ class HTMLChunkExtractor(
             lines[start - 1:end]
         )
 
-        name_node = node.child_by_field_name(
-            "tag_name"
-        )
-
-        name = (
-            name_node.text.decode(
-                "utf-8"
-            )
-            if name_node
-            else node.type
-        )
+        if not text.strip():
+            return None
 
         return Chunk(
 
@@ -53,7 +53,9 @@ class HTMLChunkExtractor(
 
             type=node.type,
 
-            name=name,
+            name=self.extract_name(
+                node
+            ),
 
             start_line=start,
 
@@ -62,3 +64,17 @@ class HTMLChunkExtractor(
             content=text,
 
         )
+
+    def extract_name(
+        self,
+        node: Node,
+    ):
+
+        if node.type in {
+            "script_element",
+            "style_element",
+        }:
+
+            return node.type
+
+        return node.type
