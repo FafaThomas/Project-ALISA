@@ -1,7 +1,7 @@
 from service import CodebaseIngestionService
 
-
-PROJECT = r"D:\Organized Projects\For Personal\Test_Frontend"
+# GitLab migration test
+PROJECT = r"C:\Users\tdecl\Downloads\ICTI_Website-main\ICTI_Website-main"
 
 ingestion = CodebaseIngestionService()
 

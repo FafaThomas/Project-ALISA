@@ -6,6 +6,10 @@ from extractors.tree_sitter_call_extractor import (
     TreeSitterCallExtractor,
 )
 
+from extractors.embedded_language_parser import (
+    EmbeddedLanguageParser,
+)
+
 
 class HTMLCallExtractor(
     TreeSitterCallExtractor
@@ -33,28 +37,34 @@ class HTMLCallExtractor(
         "ontouchend",
     }
 
+    def __init__(self):
+
+        super().__init__()
+
+        self.embedded_parser = (
+            EmbeddedLanguageParser()
+        )
+
     def is_scope(
         self,
         node: Node,
     ):
 
-        return node.type in {
-            "script_element",
-        }
+        return False
 
     def get_scope_name(
         self,
         node: Node,
     ):
 
-        return "inline_script"
+        return None
 
     def is_call(
         self,
         node: Node,
     ):
 
-        return node.type == "call_expression"
+        return False
 
     def create_call(
         self,
@@ -62,31 +72,17 @@ class HTMLCallExtractor(
         current_scope,
     ):
 
-        if not current_scope:
-            return None
-
-        function = node.child_by_field_name(
-            "function"
-        )
-
-        if not function:
-            return None
-
-        return Call(
-            caller=current_scope,
-            callee=self.text(function),
-            line=node.start_point[0] + 1,
-        )
+        return None
 
     def extract(
         self,
-        tree,
+        parse_result,
     ):
 
         calls = []
 
         self.walk_html(
-            tree.root_node,
+            parse_result.tree.root_node,
             calls,
         )
 
@@ -98,40 +94,24 @@ class HTMLCallExtractor(
         calls: list,
     ):
 
-        # ---------------------------------
-        # Event handler attributes
-        # ---------------------------------
+        # ------------------------------
+        # Inline event handler
+        # ------------------------------
 
         if node.type == "attribute":
 
-            name_node = node.child_by_field_name(
-                "name"
+            self.extract_event_handler(
+                node,
+                calls,
             )
 
-            value_node = node.child_by_field_name(
-                "value"
-            )
+        # ------------------------------
+        # Inline <script>
+        # ------------------------------
 
-            if name_node and value_node:
+        elif node.type == "script_element":
 
-                name = self.text(
-                    name_node
-                )
-
-                if name.lower() in self.EVENT_ATTRIBUTES:
-
-                    self.extract_event_calls(
-                        value_node,
-                        calls,
-                    )
-
-        # ---------------------------------
-        # Inline script
-        # ---------------------------------
-
-        if node.type == "script_element":
-
-            self.extract_script_calls(
+            self.extract_script_element(
                 node,
                 calls,
             )
@@ -143,44 +123,125 @@ class HTMLCallExtractor(
                 calls,
             )
 
-    def extract_event_calls(
-        self,
-        value_node: Node,
-        calls: list,
-    ):
-
-        text = self.text(
-            value_node
-        )
-
-        # We need a JavaScript tree to
-        # reliably identify calls inside
-        # event-handler expressions.
-        #
-        # This first pass extracts the
-        # handler expression itself.
-
-        calls.append(
-            Call(
-                caller="html_event",
-                callee=text,
-                line=value_node.start_point[0] + 1,
-            )
-        )
-
-    def extract_script_calls(
+    def extract_event_handler(
         self,
         node: Node,
         calls: list,
     ):
 
-        # The HTML grammar contains the
-        # script contents, but the contents
-        # need to be parsed as JavaScript
-        # to reliably identify call_expression
-        # nodes.
-        #
-        # For now we don't guess at the
-        # embedded JavaScript AST.
+        name_node = node.child_by_field_name(
+            "name"
+        )
 
-        return
+        value_node = node.child_by_field_name(
+            "value"
+        )
+
+        if not name_node or not value_node:
+            return
+
+        name = name_node.text.decode(
+            "utf-8"
+        )
+
+        if name not in self.EVENT_ATTRIBUTES:
+            return
+
+        source = value_node.text.decode(
+            "utf-8"
+        ).strip()
+
+        self.extract_javascript_calls(
+            source,
+            value_node.start_point[0],
+            calls,
+        )
+
+    def extract_script_element(
+        self,
+        node: Node,
+        calls: list,
+    ):
+
+        source_node = None
+
+        for child in node.children:
+
+            if child.type in {
+                "raw_text",
+                "script",
+            }:
+
+                source_node = child
+                break
+
+        if not source_node:
+            return
+
+        source = source_node.text.decode(
+            "utf-8"
+        )
+
+        self.extract_javascript_calls(
+            source,
+            source_node.start_point[0],
+            calls,
+        )
+
+    def extract_javascript_calls(
+        self,
+        source: str,
+        starting_line: int,
+        calls: list,
+    ):
+
+        tree = self.embedded_parser.parse(
+            "javascript",
+            source,
+        )
+
+        if tree is None:
+            return
+
+        self.walk_javascript_calls(
+            tree.root_node,
+            starting_line,
+            calls,
+        )
+
+    def walk_javascript_calls(
+        self,
+        node: Node,
+        starting_line: int,
+        calls: list,
+    ):
+
+        if node.type == "call_expression":
+
+            function = node.child_by_field_name(
+                "function"
+            )
+
+            if function:
+
+                calls.append(
+                    Call(
+                        caller="html",
+                        callee=function.text.decode(
+                            "utf-8"
+                        ),
+                        line=(
+                            starting_line
+                            + node.start_point[0]
+                            + 1
+                        ),
+                    )
+                )
+
+        for child in node.children:
+
+            self.walk_javascript_calls(
+                child,
+                starting_line,
+                calls,
+            )

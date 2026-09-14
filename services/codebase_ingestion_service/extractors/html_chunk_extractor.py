@@ -17,7 +17,6 @@ class HTMLChunkExtractor(
     ):
 
         return node.type in {
-            "element",
             "script_element",
             "style_element",
         }

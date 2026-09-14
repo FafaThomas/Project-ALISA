@@ -13,13 +13,9 @@ class HTMLImportExtractor:
         "video": "src",
         "audio": "src",
         "source": "src",
-        "a": "href",
     }
 
-    def extract(
-        self,
-        tree,
-    ):
+    def extract(self, tree):
 
         imports = []
 
@@ -36,13 +32,16 @@ class HTMLImportExtractor:
         imports: list,
     ):
 
-        if node.type in {
-            "script_element",
-            "style_element",
-            "element",
-        }:
+        if node.type == "element":
 
-            self.extract_resource(
+            self.extract_element(
+                node,
+                imports,
+            )
+
+        elif node.type == "script_element":
+
+            self.extract_script_element(
                 node,
                 imports,
             )
@@ -54,7 +53,7 @@ class HTMLImportExtractor:
                 imports,
             )
 
-    def extract_resource(
+    def extract_element(
         self,
         node: Node,
         imports: list,
@@ -62,72 +61,150 @@ class HTMLImportExtractor:
 
         tag_name = None
 
-        if node.type == "script_element":
+        start_tag = None
 
-            tag_name = "script"
+        for child in node.children:
 
-        elif node.type == "style_element":
+            if child.type == "start_tag":
 
+                start_tag = child
+                break
+
+        if not start_tag:
             return
 
-        else:
+        for child in start_tag.children:
 
-            tag_node = node.child_by_field_name(
-                "tag_name"
+            if child.type == "tag_name":
+
+                tag_name = (
+                    child.text
+                    .decode("utf-8")
+                    .lower()
+                )
+
+                break
+
+        if not tag_name:
+            return
+
+        attribute_name = (
+            self.RESOURCE_ATTRIBUTES.get(
+                tag_name
             )
-
-            if not tag_node:
-                return
-
-            tag_name = tag_node.text.decode(
-                "utf-8"
-            )
-
-        attribute_name = self.RESOURCE_ATTRIBUTES.get(
-            tag_name
         )
 
         if not attribute_name:
             return
 
-        attributes = node.child_by_field_name(
-            "attributes"
-        )
+        for child in start_tag.children:
 
-        if not attributes:
-            return
-
-        for attribute in attributes.children:
-
-            if attribute.type != "attribute":
+            if child.type != "attribute":
                 continue
 
-            name_node = attribute.child_by_field_name(
-                "name"
-            )
+            name = None
+            value = None
 
-            value_node = attribute.child_by_field_name(
-                "value"
-            )
+            for attribute_child in child.children:
 
-            if not name_node or not value_node:
-                continue
+                if attribute_child.type == "attribute_name":
 
-            name = name_node.text.decode(
-                "utf-8"
-            )
+                    name = (
+                        attribute_child.text
+                        .decode("utf-8")
+                        .lower()
+                    )
+
+                elif attribute_child.type == "quoted_attribute_value":
+
+                    value = (
+                        attribute_child.text
+                        .decode("utf-8")
+                        .strip("\"'")
+                    )
+
+                elif attribute_child.type == "attribute_value":
+
+                    value = (
+                        attribute_child.text
+                        .decode("utf-8")
+                    )
 
             if name != attribute_name:
                 continue
 
-            value = value_node.text.decode(
-                "utf-8"
-            ).strip("\"'")
+            if not value:
+                continue
 
             imports.append(
                 ImportSymbol(
                     module=value,
                     alias=None,
                     import_type=tag_name,
+                )
+            )
+
+    def extract_script_element(
+        self,
+        node: Node,
+        imports: list,
+    ):
+
+        start_tag = None
+
+        for child in node.children:
+
+            if child.type == "start_tag":
+
+                start_tag = child
+                break
+
+        if not start_tag:
+            return
+
+        for child in start_tag.children:
+
+            if child.type != "attribute":
+                continue
+
+            name = None
+            value = None
+
+            for attribute_child in child.children:
+
+                if attribute_child.type == "attribute_name":
+
+                    name = (
+                        attribute_child.text
+                        .decode("utf-8")
+                        .lower()
+                    )
+
+                elif attribute_child.type == "quoted_attribute_value":
+
+                    value = (
+                        attribute_child.text
+                        .decode("utf-8")
+                        .strip("\"'")
+                    )
+
+                elif attribute_child.type == "attribute_value":
+
+                    value = (
+                        attribute_child.text
+                        .decode("utf-8")
+                    )
+
+            if name != "src":
+                continue
+
+            if not value:
+                continue
+
+            imports.append(
+                ImportSymbol(
+                    module=value,
+                    alias=None,
+                    import_type="script",
                 )
             )

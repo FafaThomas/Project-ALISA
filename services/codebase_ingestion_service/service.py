@@ -19,6 +19,7 @@ from models.project_context import ProjectContext
 from extractors.extractor_dispatcher import ExtractorDispatcher
 from extractors.chunk_dispatcher import ChunkDispatcher
 from extractors.metadata_dispatcher import MetadataDispatcher
+from extractors.html_embedded_extractor import HTMLEmbeddedExtractor
 from builders.dependency_graph_builder import DependencyGraphBuilder
 from resolvers.dependency_resolver import DependencyResolver
 from extractors.call_dispatcher import CallDispatcher
@@ -58,6 +59,8 @@ class CodebaseIngestionService:
 
         self.metadata_dispatcher = MetadataDispatcher()
 
+        self.html_embedded_extractor = HTMLEmbeddedExtractor()
+
         self.import_dispatcher = ImportDispatcher()
 
         self.dependency_builder = DependencyGraphBuilder()
@@ -72,24 +75,29 @@ class CodebaseIngestionService:
 
         self.vector_storage = VectorStorage()
 
-
     def parse_sources(self, source_collection):
 
         parsed_documents = []
 
         for source in source_collection.files:
 
-            parser = self.parser_dispatcher.get_parser(source.parser)
+            parser = self.parser_dispatcher.get_parser(
+                source.parser
+            )
 
             parse_result = parser.parse(source)
 
-            extractor = self.extractor_dispatcher.get(source.parser)
+            extractor = self.extractor_dispatcher.get(
+                source.parser
+            )
 
             symbols = []
 
             if extractor and parse_result.tree is not None:
 
-                symbols = extractor.extract(parse_result.tree)
+                symbols = extractor.extract(
+                    parse_result.tree
+                )
 
             imports = []
 
@@ -109,33 +117,83 @@ class CodebaseIngestionService:
 
             if parse_result.tree is not None:
 
-                chunk_extractor = self.chunk_dispatcher.get(source.parser)
+                chunk_extractor = self.chunk_dispatcher.get(
+                    source.parser
+                )
 
                 if chunk_extractor:
 
-                    chunks = chunk_extractor.extract(parse_result)
+                    chunks = chunk_extractor.extract(
+                        parse_result
+                    )
 
             metadata = {}
 
-            metadata_extractor = self.metadata_dispatcher.get(source.parser)
+            metadata_extractor = self.metadata_dispatcher.get(
+                source.parser
+            )
 
             if metadata_extractor:
 
-                metadata = metadata_extractor.extract(parse_result)
+                metadata = metadata_extractor.extract(
+                    parse_result
+                )
 
             calls = []
 
             if parse_result.tree is not None:
 
-                call_extractor = self.call_dispatcher.get(source.parser)
+                call_extractor = self.call_dispatcher.get(
+                    source.parser
+                )
 
                 if call_extractor:
 
-                    calls = call_extractor.extract(parse_result)
+                    calls = call_extractor.extract(
+                        parse_result
+                    )
+
+            # -----------------------------------
+            # Embedded HTML languages
+            # -----------------------------------
+
+            if (
+                source.parser == "tree_sitter_html"
+                and parse_result.tree is not None
+            ):
+
+                embedded = (
+                    self.html_embedded_extractor.extract(
+                        source,
+                        parse_result.tree
+                    )
+                )
+
+                symbols.extend(
+                    embedded["symbols"]
+                )
+
+                imports.extend(
+                    embedded["imports"]
+                )
+
+                chunks.extend(
+                    embedded["chunks"]
+                )
+
+                calls.extend(
+                    embedded["calls"]
+                )
+
+            # -----------------------------------
+            # Build document
+            # -----------------------------------
 
             document = ParsedDocument(
 
-                relative_path=str(source.relative_path),
+                relative_path=str(
+                    source.relative_path
+                ),
 
                 language=source.language,
 
@@ -155,7 +213,9 @@ class CodebaseIngestionService:
 
             )
 
-            parsed_documents.append(document)
+            parsed_documents.append(
+                document
+            )
 
         return parsed_documents
 
