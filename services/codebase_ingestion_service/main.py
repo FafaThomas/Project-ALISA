@@ -1,8 +1,10 @@
-from service import CodebaseIngestionService
+import uvicorn
 
 
-PROJECT = r"D:\Organized Projects\For Portfolio\Project-ALISA"
-
-ingestion = CodebaseIngestionService()
-
-ingestion.create_project(PROJECT)
+if __name__ == "__main__":
+    uvicorn.run(
+        "api:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=True,
+    )

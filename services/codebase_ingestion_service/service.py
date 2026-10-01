@@ -326,30 +326,27 @@ class CodebaseIngestionService:
 
         return parsed_documents
 
-    def create_project(self, project_path: str | Path):
+    def create_project(
+        self,
+        project_path: str | Path,
+        output_path: str | Path,
+    ):
+        output_dir = Path(output_path)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         workspace = self.workspace.collect(project_path)
-
         source_collection = self.source.collect(workspace)
-
         sql_collection = self.sql.collect(workspace)
-
         manifest_collection = self.manifest.collect(workspace)
 
         source_documents = self.parse_sources(source_collection)
-
         sql_documents = self.parse_sql(sql_collection)
-
         manifest_documents = self.parse_manifests(manifest_collection)
 
         parsed_documents = [
-
             *source_documents,
-
             *sql_documents,
-
             *manifest_documents,
-
         ]
 
         dependency_graph = self.dependency_builder.build(parsed_documents)
@@ -370,32 +367,33 @@ class CodebaseIngestionService:
             [
                 document.model_dump(mode="json")
                 for document in parsed_documents
-            ]
+            ],
+            output_dir,
         )
 
         self.save_json(
             "dependency_graph.json",
-            dependency_graph.model_dump(mode="json")
+            dependency_graph.model_dump(mode="json"),
+            output_dir,
         )
 
         self.save_json(
             "call_graph.json",
-            call_graph.model_dump(mode="json")
+            call_graph.model_dump(mode="json"),
+            output_dir,
         )
 
         context = ProjectContext(
-
             workspace=workspace,
-
             source_collection=source_collection,
-
             sql_collection=sql_collection,
-
             manifest_collection=manifest_collection,
-
         )
 
-        self.save_project_context(context)
+        self.save_project_context(
+            context,
+            output_dir,
+        )
 
         self.vector_storage.store(
             project_name=workspace.name,
@@ -403,68 +401,53 @@ class CodebaseIngestionService:
         )
 
         print()
-
         print("=" * 60)
         print(workspace.name)
         print("=" * 60)
 
         print()
-
         print(f"Source Files      : {context.source_collection.total_files}")
-
         print(f"SQL Files         : {context.sql_collection.total_documents}")
-
         print(f"Manifest Files    : {context.manifest_collection.total_documents}")
-
         print(f"Parsed Documents  : {len(parsed_documents)}")
 
         print()
 
-        
         return context
 
-    def save_json(self, filename: str, data):
+    def save_json(
+        self,
+        filename: str,
+        data,
+        output_dir: Path,
+    ):
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        output = Path("output")
-
-        output.mkdir(exist_ok=True)
-
-        output_file = output / filename
+        output_file = output_dir / filename
 
         output_file.write_text(
-
             json.dumps(
-
                 data,
-
                 indent=4,
-
                 ensure_ascii=False,
-
             ),
-
             encoding="utf-8",
-
         )
 
-    def save_project_context(self, context: ProjectContext):
+    def save_project_context(
+        self,
+        context: ProjectContext,
+        output_dir: Path,
+    ):
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        output = Path("output")
-
-        output.mkdir(exist_ok=True)
-
-        output_file = output / "project_context.json"
+        output_file = output_dir / "project_context.json"
 
         output_file.write_text(
-
             context.model_dump_json(
-
                 indent=4
-
             ),
-
-            encoding="utf-8"
-
+            encoding="utf-8",
         )
 
     def update_project(self, project_path: str | Path):
