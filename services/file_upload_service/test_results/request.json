@@ -1,0 +1,22 @@
+{
+    "target_directory": "C:\\Users\\tdecl\\Downloads\\coding_agent_test",
+    "instruction": "Create a Python command-line program called number_magic.py. The program should accept a positive integer from the user and perform several interesting calculations on it: determine whether it is prime, calculate its factorial, generate its Fibonacci sequence up to that number, calculate the sum of all integers from 1 through the number, and determine all positive divisors of the number. Present the results in a clean, readable format. Include input validation and handle invalid input gracefully. Organize the code into separate functions so each calculation can be tested independently.",
+    "codebase_map": {
+        "workspace": {
+            "name": "coding_agent_test",
+            "path": "C:\\Users\\tdecl\\Downloads\\coding_agent_test"
+        },
+        "source_collection": {
+            "total_files": 0,
+            "languages": {},
+            "files": []
+        },
+        "dependency_graph": {
+            "nodes": [],
+            "edges": []
+        },
+        "call_graph": {
+            "calls": []
+        }
+    }
+}
