@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .factions import FactionRegistry
 from .models import Chunk, IngestionReport
+from .agent_context import AgentIdentity
 from .extractors import extract
 from .indexing import NoopIndexer
 from .artifact_stubs import make_artifact_stub
@@ -263,21 +264,89 @@ def _relative_path(root, raw_path):
 
 
 class IngestionPipeline:
-    def __init__(self, registry=None, indexer=None, summarizer=None):
+    def __init__(
+        self,
+        registry=None,
+        indexer=None,
+        summarizer=None,
+        agent_provider=None,
+        agent_registry=None,
+    ):
         self.registry = registry or FactionRegistry()
         self.indexer = indexer or NoopIndexer()
+        self.agent_provider = agent_provider
+        self.agent_registry = agent_registry
         self.summarizer = summarizer or (
             lambda text, path: text[:1200]
             + ("\n[excerpt truncated]" if len(text) > 1200 else "")
         )
 
-    def run(
+    def run(self, root, faction_id, source_id=None, report_path=None, reconcile=True):
+        """Run explicit-faction ingestion for manual/admin callers."""
+        return self._run(
+            root, faction_id, source_id, report_path, reconcile, agent_id=None
+        )
+
+    def run_for_current_agent(
+        self, root, source_id=None, report_path=None, reconcile=True
+    ):
+        """Ingest for the authenticated caller using registry-owned faction data."""
+        if self.agent_provider is None:
+            raise RuntimeError(
+                "Agent-aware ingestion requires a trusted agent_provider."
+            )
+        if self.agent_registry is None:
+            raise RuntimeError(
+                "Agent-aware ingestion requires an authoritative agent_registry."
+            )
+
+        agent_id = self.agent_provider.resolve_current_agent_id()
+        if (
+            not isinstance(agent_id, str)
+            or not agent_id.strip()
+            or agent_id != agent_id.strip()
+        ):
+            raise PermissionError(
+                "No valid authenticated ALISA agent ID is available."
+            )
+
+        identity = self.agent_registry.get_agent(agent_id)
+        if identity is None:
+            raise PermissionError(f"Unknown ALISA agent: {agent_id}")
+        if not isinstance(identity, AgentIdentity):
+            raise PermissionError("The agent registry returned an invalid identity.")
+        if identity.agent_id != agent_id:
+            raise PermissionError(
+                "The agent registry returned an identity that does not match "
+                "the authenticated caller."
+            )
+        if (
+            not isinstance(identity.faction_id, str)
+            or not identity.faction_id.strip()
+            or identity.faction_id != identity.faction_id.strip()
+        ):
+            raise PermissionError("The agent registry returned an invalid faction_id.")
+
+        # Faction membership comes only from the authoritative agent registry.
+        faction = self.registry.get(identity.faction_id)
+        return self._run(
+            root,
+            faction.faction_id,
+            source_id,
+            report_path,
+            reconcile,
+            agent_id=identity.agent_id,
+        )
+
+    def _run(
         self,
         root,
         faction_id,
         source_id=None,
         report_path=None,
         reconcile=True,
+        *,
+        agent_id=None,
     ):
         faction = self.registry.get(faction_id)
         root = Path(root).resolve()
@@ -476,6 +545,11 @@ class IngestionPipeline:
                     "message": f"{type(exc).__name__}: {exc}",
                     "chunks": 1,
                 })
+
+        # Apply provenance uniformly to extracted chunks and generated stubs.
+        # The public agent-aware entry point obtains this ID from the provider.
+        for chunk in chunks:
+            chunk.agent_id = agent_id
 
         try:
             report.indexed_chunks = self.indexer.upsert(chunks)

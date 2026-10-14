@@ -13,7 +13,7 @@ class FactionRegistry:
             Faction("forge", f"{prefix}forge", "Engineering, modeling, coding, networking, hacking, and robotics"),
             Faction("pentagram", f"{prefix}pentagram", "Chemistry, physics, mathematics, biology, and medicine"),
             Faction("corpus", f"{prefix}corpus", "Languages and cultures"),
-            Faction("knife", f"{prefix}knife", "Security, adversarial analysis, and tactical operations"),
+            Faction("knife", f"{prefix}knife", "Food, agriculture, hunting, and cooking"),
         ]
         self._factions = {f.faction_id: f for f in factions}
 

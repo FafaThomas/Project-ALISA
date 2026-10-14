@@ -13,6 +13,7 @@ class Chunk:
     ordinal: int
     text: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    agent_id: str | None = None
 
     def payload(self):
         return {
@@ -25,6 +26,8 @@ class Chunk:
             "ordinal": self.ordinal,
             "text": self.text,
             **self.metadata,
+            # Explicit provenance wins over arbitrary extractor metadata.
+            "agent_id": self.agent_id,
         }
 
 @dataclass
