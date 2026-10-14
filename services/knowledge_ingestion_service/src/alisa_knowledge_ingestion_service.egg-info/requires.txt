@@ -1,0 +1,7 @@
+
+[test]
+pytest>=8
+
+[vector]
+qdrant-client>=1.9
+requests>=2.31

@@ -1,0 +1,2 @@
+[console_scripts]
+knowledge-ingest = knowledge_ingestion_service.cli:main

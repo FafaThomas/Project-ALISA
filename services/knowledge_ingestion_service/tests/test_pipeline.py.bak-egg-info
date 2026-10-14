@@ -1,0 +1,291 @@
+import json
+import pytest
+from src.knowledge_ingestion_service.pipeline import IngestionPipeline
+
+def test_faction_and_source_namespaces_are_attached(tmp_path):
+    (tmp_path / "main.py").write_text("print('hello')", encoding="utf-8")
+    class CaptureIndexer:
+        def __init__(self): self.chunks = []; self.reconciled = None
+        def upsert(self, chunks): self.chunks.extend(chunks); return len(chunks)
+        def reconcile_source(self, source_id, seen): self.reconciled = (source_id, seen); return 0
+    indexer = CaptureIndexer()
+    report = IngestionPipeline(indexer=indexer).run(tmp_path, "forge", "test-source")
+    assert report.collection_name == "alisa_faction_forge"
+    assert report.source_id == "test-source"
+    assert indexer.chunks[0].faction_id == "forge"
+    assert indexer.chunks[0].source_id == "test-source"
+    assert indexer.reconciled[0] == "test-source"
+    assert indexer.reconciled[1] == {
+        chunk.chunk_id for chunk in indexer.chunks
+    }
+
+def test_unknown_faction_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        IngestionPipeline().run(tmp_path, "not-a-real-faction")
+
+def test_secrets_excluded(tmp_path):
+    (tmp_path / ".env").write_text("API_KEY=secret", encoding="utf-8")
+    (tmp_path / "ok.py").write_text("print('ok')", encoding="utf-8")
+    report = IngestionPipeline().run(tmp_path, "forge")
+    assert report.discovered == 1 and report.extracted == 1
+
+def test_csv_profile_and_report(tmp_path):
+    (tmp_path / "data.csv").write_text("time,kw\n10:00,2.1\n11:00,2.4\n", encoding="utf-8")
+    out = tmp_path / "report.json"
+    report = IngestionPipeline().run(tmp_path, "pentagram", report_path=out)
+    assert report.extracted == 1
+    assert json.loads(out.read_text())["collection_name"] == "alisa_faction_pentagram"
+
+def test_failed_file_prevents_reconciliation(tmp_path):
+    (tmp_path / "bad.json").write_text("{bad", encoding="utf-8")
+    class TrackIndexer:
+        def __init__(self): self.cleaned = False
+        def upsert(self, chunks): return 0
+        def reconcile_source(self, source_id, seen): self.cleaned = True; return 0
+    indexer = TrackIndexer()
+    report = IngestionPipeline(indexer=indexer).run(tmp_path, "forge", "s1")
+    assert not report.complete
+    assert not indexer.cleaned
+    
+def test_chunk_ids_stay_stable_when_content_changes(tmp_path):
+    class CaptureIndexer:
+        def __init__(self):
+            self.chunks = []
+            self.expected_ids = None
+
+        def upsert(self, chunks):
+            self.chunks = list(chunks)
+            return len(chunks)
+
+        def reconcile_source(self, source_id, expected_chunk_ids):
+            self.expected_ids = expected_chunk_ids
+            return 0
+
+    source = tmp_path / "device.md"
+    source.write_text(
+        "Device ORBITAL-WRENCH-731 uses a 48 volt supply.",
+        encoding="utf-8",
+    )
+
+    indexer = CaptureIndexer()
+    pipeline = IngestionPipeline(indexer=indexer)
+
+    first = pipeline.run(tmp_path, "forge", "stable-id-test")
+    first_ids = {chunk.chunk_id for chunk in indexer.chunks}
+    first_hash = indexer.chunks[0].content_hash
+
+    source.write_text(
+        "Device COBALT-FALCON-842 uses a 72 volt supply.",
+        encoding="utf-8",
+    )
+
+    second = pipeline.run(tmp_path, "forge", "stable-id-test")
+    second_ids = {chunk.chunk_id for chunk in indexer.chunks}
+
+    assert first.complete and second.complete
+    assert first_ids == second_ids
+    assert indexer.chunks[0].content_hash != first_hash
+    assert indexer.expected_ids == second_ids
+
+
+def test_unsupported_file_creates_stub_and_allows_reconciliation(tmp_path):
+    (tmp_path / "unsupported.unknown").write_bytes(b"unknown format")
+
+    class TrackIndexer:
+        def __init__(self):
+            self.cleaned = False
+            self.chunks = []
+
+        def upsert(self, chunks):
+            self.chunks = list(chunks)
+            return len(self.chunks)
+
+        def reconcile_source(self, source_id, expected_chunk_ids):
+            self.cleaned = True
+            return 0
+
+    indexer = TrackIndexer()
+    report = IngestionPipeline(indexer=indexer).run(
+        tmp_path, "forge", "unsupported-test"
+    )
+
+    assert report.complete
+    assert report.metadata_only == 1
+    assert report.skipped == 0
+    assert indexer.cleaned
+    assert len(indexer.chunks) == 1
+    assert indexer.chunks[0].payload()["record_type"] == "artifact_stub"
+
+def test_unsupported_file_creates_metadata_stub(tmp_path):
+    (tmp_path / "assembly.stl").write_bytes(b"not parsed as geometry")
+
+    class CaptureIndexer:
+        def __init__(self):
+            self.chunks = []
+            self.reconciled = None
+
+        def upsert(self, chunks):
+            self.chunks = list(chunks)
+            return len(self.chunks)
+
+        def reconcile_source(self, source_id, expected_chunk_ids):
+            self.reconciled = (source_id, expected_chunk_ids)
+            return 0
+
+    indexer = CaptureIndexer()
+    report = IngestionPipeline(indexer=indexer).run(
+        tmp_path, "forge", "stub-test"
+    )
+
+    assert report.complete
+    assert report.metadata_only == 1
+    assert report.extracted == 0
+    assert len(indexer.chunks) == 1
+
+    chunk = indexer.chunks[0]
+    payload = chunk.payload()
+
+    assert payload["record_type"] == "artifact_stub"
+    assert payload["inferred_category"] == "3d_geometry"
+    assert payload["content_inspected"] is False
+    assert payload["artifact_status"] == "metadata_only"
+    assert "assembly.stl" in chunk.text
+    assert indexer.reconciled is not None
+
+
+def test_failed_extraction_creates_stub_without_reconciliation(tmp_path):
+    (tmp_path / "broken.json").write_text(
+        "{ invalid json",
+        encoding="utf-8",
+    )
+
+    class CaptureIndexer:
+        def __init__(self):
+            self.chunks = []
+            self.reconciled = False
+
+        def upsert(self, chunks):
+            self.chunks = list(chunks)
+            return len(self.chunks)
+
+        def reconcile_source(self, source_id, expected_chunk_ids):
+            self.reconciled = True
+            return 0
+
+    indexer = CaptureIndexer()
+    report = IngestionPipeline(indexer=indexer).run(
+        tmp_path, "forge", "broken-test"
+    )
+
+    assert not report.complete
+    assert report.blocked == 1
+    assert not indexer.reconciled
+    assert any(
+        chunk.payload().get("record_type") == "artifact_stub"
+        for chunk in indexer.chunks
+    )
+
+
+def test_stub_identity_is_stable(tmp_path):
+    from src.knowledge_ingestion_service.pipeline import _make_stub_chunks
+    from src.knowledge_ingestion_service.factions import FactionRegistry
+
+    faction = FactionRegistry().get("forge")
+
+    first = _make_stub_chunks(
+        faction,
+        "stable-stub-test",
+        "storage/model.gguf",
+        status="metadata_only",
+        reason="No extractor registered",
+    )
+
+    second = _make_stub_chunks(
+        faction,
+        "stable-stub-test",
+        "storage/model.gguf",
+        status="metadata_only",
+        reason="No extractor registered",
+    )
+
+    assert [c.chunk_id for c in first] == [c.chunk_id for c in second]
+
+def test_extract_utf16le_text_with_bom(tmp_path):
+    from src.knowledge_ingestion_service.extractors import extract
+
+    source = tmp_path / "tree.txt"
+    source.write_bytes(
+        "Folder PATH listing\n├── src\n└── README.md\n".encode("utf-16")
+    )
+
+    text, extractor, media_type, metadata = extract(source)
+
+    assert "Folder PATH listing" in text
+    assert "README.md" in text
+    assert "\x00" not in text
+    assert extractor == "generic_text"
+
+
+def test_extract_utf8_text_with_bom(tmp_path):
+    from src.knowledge_ingestion_service.extractors import extract
+
+    source = tmp_path / "notes.txt"
+    source.write_bytes(b"\xef\xbb\xbfALISA UTF-8 content")
+
+    text, _, _, _ = extract(source)
+
+    assert text == "ALISA UTF-8 content"
+
+
+def test_extract_utf16_json_with_bom(tmp_path):
+    from src.knowledge_ingestion_service.extractors import extract
+
+    source = tmp_path / "data.json"
+    source.write_bytes('{"status": "ok"}'.encode("utf-16"))
+
+    text, extractor, media_type, metadata = extract(source)
+
+    assert json.loads(text) == {"status": "ok"}
+    assert extractor == "json"
+    assert media_type == "application/json"
+
+
+def test_malformed_json_still_fails(tmp_path):
+    from src.knowledge_ingestion_service.extractors import extract
+
+    source = tmp_path / "broken.json"
+    source.write_text("{ invalid json", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        extract(source)
+
+
+def test_legacy_snapshot_and_backup_files_are_excluded(tmp_path):
+    from src.knowledge_ingestion_service.pipeline import _discover
+
+    canonical = tmp_path / "src" / "knowledge_ingestion_service" / "pipeline.py"
+    legacy = (
+        tmp_path / "services" / "knowledge_ingestion_service"
+        / "alisa_faction_knowledge_ingestion" / "src" / "pipeline.py"
+    )
+    backup = (
+        tmp_path / "services" / "knowledge_ingestion_service"
+        / "src" / "knowledge_ingestion_service" / "pipeline.py.bak-test"
+    )
+
+    for path in (canonical, legacy, backup):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# test artifact", encoding="utf-8")
+
+    discovered, errors = _discover(tmp_path)
+    relative = {path.relative_to(tmp_path).as_posix() for path in discovered}
+
+    assert not errors
+    assert "src/knowledge_ingestion_service/pipeline.py" in relative
+    assert not any(
+        path.startswith(
+            "services/knowledge_ingestion_service/alisa_faction_knowledge_ingestion/"
+        )
+        for path in relative
+    )
+    assert not any(".bak-" in path.rsplit("/", 1)[-1].lower() for path in relative)

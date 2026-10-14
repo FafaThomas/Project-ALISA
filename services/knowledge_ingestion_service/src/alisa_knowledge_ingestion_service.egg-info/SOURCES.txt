@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/alisa_knowledge_ingestion_service.egg-info/PKG-INFO
+src/alisa_knowledge_ingestion_service.egg-info/SOURCES.txt
+src/alisa_knowledge_ingestion_service.egg-info/dependency_links.txt
+src/alisa_knowledge_ingestion_service.egg-info/entry_points.txt
+src/alisa_knowledge_ingestion_service.egg-info/requires.txt
+src/alisa_knowledge_ingestion_service.egg-info/top_level.txt
+src/knowledge_ingestion_service/__init__.py
+src/knowledge_ingestion_service/cli.py
+src/knowledge_ingestion_service/extractors.py
+src/knowledge_ingestion_service/indexing.py
+src/knowledge_ingestion_service/models.py
+src/knowledge_ingestion_service/pipeline.py
+src/knowledge_ingestion_service/summarization.py
+tests/test_pipeline.py

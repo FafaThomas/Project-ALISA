@@ -1,0 +1,510 @@
+import hashlib
+import json
+import os
+from pathlib import Path
+
+from .factions import FactionRegistry
+from .models import Chunk, IngestionReport
+from .extractors import extract
+from .indexing import NoopIndexer
+from .artifact_stubs import make_artifact_stub
+
+
+SECRET_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.production",
+    "credentials.json",
+    "secrets.json",
+}
+SECRET_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
+
+EXCLUDED_DIRS = {
+    # Version control
+    ".git",
+
+    # Python environments and generated caches
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "site-packages",
+
+    # JavaScript dependencies
+    "node_modules",
+
+    # AI models and runtime caches
+    "cache",
+    "caches",
+    ".cache",
+    ".huggingface",
+    "huggingface",
+    "models",
+    "checkpoints",
+    "xtts_models",
+    "tts_models",
+
+    # Generated outputs
+    "generated",
+    "output",
+    "outputs",
+    "artifacts",
+    "temp",
+    "tmp",
+    "logs",
+}
+
+EXCLUDED_PATHS = {
+    "database/postgres/data",
+    "database/clickhouse/data",
+    "database/qdrant/storage",
+}
+
+
+def _excluded_path(path):
+    normalized = Path(path).as_posix().strip("/").lower()
+    return any(
+        normalized == excluded or normalized.startswith(excluded + "/")
+        for excluded in EXCLUDED_PATHS
+    )
+
+
+def _excluded(path):
+    path = Path(path)
+    return (
+        path.name.lower() in SECRET_NAMES
+        or path.name.lower().startswith(".env.")
+        or path.suffix.lower() in SECRET_SUFFIXES
+        or any(part.lower() in EXCLUDED_DIRS for part in path.parts)
+        or _excluded_path(path)
+    )
+
+
+
+def _discover(root):
+    """Discover files, pruning excluded directories and recording walk errors."""
+    root = Path(root).resolve()
+    candidates = []
+    errors = []
+
+    def onerror(exc):
+        errors.append({
+            "path": getattr(exc, "filename", None),
+            "error": str(exc),
+        })
+
+    for current, directories, filenames in os.walk(
+        root, topdown=True, onerror=onerror
+    ):
+        current_path = Path(current)
+
+        directories[:] = [
+            name for name in directories
+            if not _excluded(current_path.joinpath(name).relative_to(root))
+        ]
+
+        for filename in filenames:
+            path = current_path / filename
+            if not _excluded(path.relative_to(root)):
+                candidates.append(path)
+
+    return candidates, errors
+
+
+
+def _chunks(
+    artifact_id,
+    faction_id,
+    collection_name,
+    source_id,
+    relative_path,
+    content_hash,
+    title,
+    extractor,
+    media_type,
+    summary,
+    text,
+    size=2400,
+    overlap=250,
+    extra_metadata=None,
+    id_namespace="content",
+):
+    text = text.strip()
+    chunks, start, ordinal = [], 0, 0
+
+    while start < len(text):
+        end = min(start + size, len(text))
+
+        if end < len(text):
+            boundary = max(
+                text.rfind("\n", start + size // 2, end),
+                text.rfind(" ", start + size // 2, end),
+            )
+            if boundary > start:
+                end = boundary
+
+        body = text[start:end].strip()
+
+        if body:
+            if id_namespace == "content":
+                identity = f"{artifact_id}:{ordinal}"
+            else:
+                identity = f"{artifact_id}:{id_namespace}:{ordinal}"
+
+            cid = hashlib.sha256(identity.encode()).hexdigest()[:32]
+
+            metadata = {
+                "title": title,
+                "summary": summary,
+                "extractor": extractor,
+                "media_type": media_type,
+                "start_char": start,
+                "end_char": end,
+            }
+
+            if extra_metadata:
+                metadata.update(extra_metadata)
+
+            chunks.append(
+                Chunk(
+                    cid,
+                    artifact_id,
+                    faction_id,
+                    collection_name,
+                    source_id,
+                    relative_path,
+                    content_hash,
+                    ordinal,
+                    body,
+                    metadata,
+                )
+            )
+            ordinal += 1
+
+        if end >= len(text):
+            break
+
+        start = max(start + 1, end - overlap)
+
+    return chunks
+
+
+def _artifact_id(faction_id, source_id, relative_path):
+    return hashlib.sha256(
+        f"{faction_id}:{source_id}:{relative_path}".encode("utf-8")
+    ).hexdigest()[:32]
+
+
+def _make_stub_chunks(
+    faction,
+    source_id,
+    relative_path,
+    *,
+    status,
+    reason,
+    size_bytes=None,
+    modified_time=None,
+    is_directory=False,
+):
+    artifact_id = _artifact_id(
+        faction.faction_id, source_id, relative_path
+    )
+
+    stub = make_artifact_stub(
+        relative_path,
+        status=status,
+        reason=reason,
+        size_bytes=size_bytes,
+        modified_time=modified_time,
+        is_directory=is_directory,
+    )
+
+    text = stub["text"]
+    content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    return _chunks(
+        artifact_id,
+        faction.faction_id,
+        faction.collection_name,
+        source_id,
+        relative_path,
+        content_hash,
+        Path(relative_path).name or relative_path,
+        "artifact_stub",
+        "text/plain",
+        text,
+        text,
+        extra_metadata=stub["metadata"],
+        id_namespace="stub",
+    )
+
+
+def _relative_path(root, raw_path):
+    if not raw_path:
+        return None
+
+    try:
+        path = Path(os.path.abspath(raw_path))
+        return path.relative_to(root).as_posix()
+    except (ValueError, OSError):
+        return None
+
+
+class IngestionPipeline:
+    def __init__(self, registry=None, indexer=None, summarizer=None):
+        self.registry = registry or FactionRegistry()
+        self.indexer = indexer or NoopIndexer()
+        self.summarizer = summarizer or (
+            lambda text, path: text[:1200]
+            + ("\n[excerpt truncated]" if len(text) > 1200 else "")
+        )
+
+    def run(
+        self,
+        root,
+        faction_id,
+        source_id=None,
+        report_path=None,
+        reconcile=True,
+    ):
+        faction = self.registry.get(faction_id)
+        root = Path(root).resolve()
+
+        if not root.is_dir():
+            raise ValueError(f"Input root is not a directory: {root}")
+
+        source_id = source_id or hashlib.sha256(
+            str(root).encode("utf-8")
+        ).hexdigest()[:16]
+
+        report = IngestionReport(
+            faction.faction_id,
+            faction.collection_name,
+            source_id,
+            str(root),
+        )
+
+        candidates, discovery_errors = _discover(root)
+        report.discovered = len(candidates) + len(discovery_errors)
+
+        chunks = []
+        incomplete = False
+        failed = False
+
+        # An inaccessible directory is represented as a subtree stub.
+        for raw_path, message in discovery_errors:
+            relative_path = _relative_path(root, raw_path)
+
+            if relative_path is None:
+                incomplete = True
+                report.blocked += 1
+                report.files.append({
+                    "path": None,
+                    "status": "blocked_subtree",
+                    "message": message,
+                })
+                continue
+
+            chunks.extend(
+                _make_stub_chunks(
+                    faction,
+                    source_id,
+                    relative_path,
+                    status="blocked",
+                    reason=message,
+                    is_directory=True,
+                )
+            )
+
+            incomplete = True
+            report.blocked += 1
+            report.files.append({
+                "path": relative_path,
+                "status": "blocked_subtree",
+                "message": message,
+                "chunks": 1,
+            })
+
+        for path in candidates:
+            rel = path.relative_to(root).as_posix()
+
+            try:
+                stat = path.stat()
+                size_bytes = stat.st_size
+                modified_time = __import__("datetime").datetime.fromtimestamp(
+                    stat.st_mtime
+                ).astimezone().isoformat()
+
+                # Respect the extractor's 100 MiB safety limit without
+                # reading a potentially huge file into memory first.
+                if size_bytes > 100 * 1024 * 1024:
+                    chunks.extend(
+                        _make_stub_chunks(
+                            faction,
+                            source_id,
+                            rel,
+                            status="blocked",
+                            reason="File exceeds 100 MiB safety limit",
+                            size_bytes=size_bytes,
+                            modified_time=modified_time,
+                        )
+                    )
+                    incomplete = True
+                    report.blocked += 1
+                    report.files.append({
+                        "path": rel,
+                        "status": "blocked",
+                        "message": "File exceeds 100 MiB safety limit",
+                        "chunks": 1,
+                    })
+                    continue
+
+                try:
+                    text, extractor, media_type, metadata = extract(path)
+
+                except NotImplementedError as exc:
+                    chunks.extend(
+                        _make_stub_chunks(
+                            faction,
+                            source_id,
+                            rel,
+                            status="metadata_only",
+                            reason=str(exc),
+                            size_bytes=size_bytes,
+                            modified_time=modified_time,
+                        )
+                    )
+                    report.metadata_only += 1
+                    report.files.append({
+                        "path": rel,
+                        "status": "metadata_only",
+                        "message": str(exc),
+                        "chunks": 1,
+                    })
+                    continue
+
+                content_hash = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+
+                summary = self.summarizer(text, rel)
+
+                parts = _chunks(
+                    _artifact_id(faction.faction_id, source_id, rel),
+                    faction.faction_id,
+                    faction.collection_name,
+                    source_id,
+                    rel,
+                    content_hash,
+                    path.name,
+                    extractor,
+                    media_type,
+                    summary,
+                    text,
+                    extra_metadata=metadata,
+                )
+
+                chunks.extend(parts)
+                report.extracted += 1
+                report.files.append({
+                    "path": rel,
+                    "status": "extracted",
+                    "artifact_id": _artifact_id(
+                        faction.faction_id, source_id, rel
+                    ),
+                    "chunks": len(parts),
+                })
+
+            except OSError as exc:
+                # The path was discovered, but access failed later.
+                # Add a separate stub and do not destructively reconcile.
+                try:
+                    size_bytes = path.stat().st_size
+                except OSError:
+                    size_bytes = None
+
+                chunks.extend(
+                    _make_stub_chunks(
+                        faction,
+                        source_id,
+                        rel,
+                        status="blocked",
+                        reason=f"{type(exc).__name__}: {exc}",
+                        size_bytes=size_bytes,
+                    )
+                )
+
+                incomplete = True
+                report.blocked += 1
+                report.files.append({
+                    "path": rel,
+                    "status": "blocked",
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "chunks": 1,
+                })
+
+            except Exception as exc:
+                # Parse errors and other extractor failures get a useful
+                # fallback record, but make the scan incomplete.
+                chunks.extend(
+                    _make_stub_chunks(
+                        faction,
+                        source_id,
+                        rel,
+                        status="blocked",
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+
+                incomplete = True
+                report.blocked += 1
+                report.files.append({
+                    "path": rel,
+                    "status": "blocked",
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "chunks": 1,
+                })
+
+        try:
+            report.indexed_chunks = self.indexer.upsert(chunks)
+        except Exception as exc:
+            failed = True
+            report.failed += 1
+            report.warnings.append(
+                "Index upsert failed; reconciliation skipped: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+        report.complete = not failed and not incomplete
+
+        if reconcile and report.complete:
+            try:
+                expected_chunk_ids = {
+                    chunk.chunk_id for chunk in chunks
+                }
+                report.stale_points_removed = (
+                    self.indexer.reconcile_source(
+                        source_id, expected_chunk_ids
+                    )
+                )
+            except Exception as exc:
+                report.warnings.append(
+                    "Source reconciliation failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+        elif reconcile:
+            report.warnings.append(
+                "Reconciliation skipped because discovery or "
+                "artifact access was incomplete."
+            )
+
+        if report_path:
+            Path(report_path).write_text(
+                json.dumps(report.to_dict(), indent=2),
+                encoding="utf-8",
+            )
+
+        return report

@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: alisa-faction-knowledge-ingestion
+Version: 0.3.0
+Requires-Python: >=3.10
+Provides-Extra: test
+Requires-Dist: pytest>=8; extra == "test"
+Provides-Extra: qdrant
+Requires-Dist: qdrant-client>=1.9; extra == "qdrant"
+Requires-Dist: requests>=2.31; extra == "qdrant"

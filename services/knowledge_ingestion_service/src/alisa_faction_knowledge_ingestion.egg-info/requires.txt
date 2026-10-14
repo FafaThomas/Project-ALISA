@@ -1,0 +1,7 @@
+
+[qdrant]
+qdrant-client>=1.9
+requests>=2.31
+
+[test]
+pytest>=8
