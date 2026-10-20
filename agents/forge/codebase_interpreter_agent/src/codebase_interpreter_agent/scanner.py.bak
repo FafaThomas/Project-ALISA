@@ -1,0 +1,346 @@
+﻿from __future__ import annotations
+
+import ast
+import hashlib
+import os
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+
+EXCLUDED_DIRS = {
+    ".git", ".venv", "venv", "env", "node_modules",
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "site-packages", "dist", "build", "target", "bin", "obj",
+    ".idea", ".vscode",
+}
+
+# Relative to the scanned project root. These are runtime/generated
+# contents, not source code. Keep schemas and migration files scannable.
+EXCLUDED_RELATIVE_DIRS = {
+    "database/clickhouse/data",
+    "storage",
+}
+
+SECRET_NAMES = {
+    ".env", "credentials.json", "secrets.json",
+}
+
+SECRET_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
+MAX_REPORTED_ERRORS = 20
+
+
+@dataclass
+class FileRecord:
+    path: str
+    language: str
+    size_bytes: int
+    sha256: str
+    status: str = "inventoried"
+
+
+@dataclass
+class Symbol:
+    path: str
+    name: str
+    qualified_name: str
+    kind: str
+    line: int
+    end_line: int
+    decorators: list[str] = field(default_factory=list)
+    bases: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ImportReference:
+    path: str
+    line: int
+    module: str
+    names: list[str]
+    relative_level: int = 0
+
+
+@dataclass
+class ScanReport:
+    root: str
+    files: list[FileRecord] = field(default_factory=list)
+    symbols: list[Symbol] = field(default_factory=list)
+    imports: list[ImportReference] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _excluded_dir(name: str) -> bool:
+    return name.lower() in EXCLUDED_DIRS
+
+
+def _excluded_relative_dir(relative: Path) -> bool:
+    normalized = relative.as_posix().strip("/").lower()
+    return any(
+        normalized == excluded or normalized.startswith(excluded + "/")
+        for excluded in EXCLUDED_RELATIVE_DIRS
+    )
+
+
+def _is_secret(path: Path) -> bool:
+    name = path.name.lower()
+    return (
+        name in SECRET_NAMES
+        or name.startswith(".env.")
+        or path.suffix.lower() in SECRET_SUFFIXES
+    )
+
+
+def _language(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if path.name.lower() in {"dockerfile", "makefile"}:
+        return "build"
+
+    languages = {
+        ".py": "python",
+        ".pyi": "python",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".mjs": "javascript",
+        ".cjs": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".java": "java",
+        ".cs": "csharp",
+        ".go": "go",
+        ".rs": "rust",
+        ".cpp": "cpp",
+        ".cc": "cpp",
+        ".c": "c",
+        ".h": "c",
+        ".hpp": "cpp",
+        ".sql": "sql",
+        ".json": "json",
+        ".yaml": "yaml",
+        ".yml": "yaml",
+        ".toml": "toml",
+        ".md": "markdown",
+        ".html": "html",
+        ".css": "css",
+        ".sh": "shell",
+        ".ps1": "powershell",
+        ".xml": "xml",
+        ".dockerfile": "build",
+    }
+    return languages.get(suffix, "other")
+
+
+def _name(node: ast.AST) -> str:
+    try:
+        return ast.unparse(node)
+    except (AttributeError, TypeError, ValueError):
+        return type(node).__name__
+
+
+def _extract_python(
+    path: str,
+    source: str,
+    report: ScanReport,
+) -> None:
+    try:
+        tree = ast.parse(source, filename=path)
+    except (SyntaxError, ValueError) as exc:
+        report.errors.append(
+            f"Python parse failed at {path}: {exc}"
+        )
+        return
+
+    def visit(node: ast.AST, scope: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                qualified = ".".join(scope + [child.name])
+                kind = (
+                    "class" if isinstance(child, ast.ClassDef)
+                    else "async_function"
+                    if isinstance(child, ast.AsyncFunctionDef)
+                    else "function"
+                )
+
+                report.symbols.append(
+                    Symbol(
+                        path=path,
+                        name=child.name,
+                        qualified_name=qualified,
+                        kind=kind,
+                        line=child.lineno,
+                        end_line=getattr(child, "end_lineno", child.lineno),
+                        decorators=[_name(d) for d in child.decorator_list],
+                        bases=[
+                            _name(base) for base in child.bases
+                        ] if isinstance(child, ast.ClassDef) else [],
+                    )
+                )
+                visit(child, scope + [child.name])
+            elif isinstance(child, ast.Import):
+                report.imports.append(
+                    ImportReference(
+                        path=path,
+                        line=child.lineno,
+                        module="",
+                        names=[alias.name for alias in child.names],
+                    )
+                )
+            elif isinstance(child, ast.ImportFrom):
+                report.imports.append(
+                    ImportReference(
+                        path=path,
+                        line=child.lineno,
+                        module=child.module or "",
+                        names=[alias.name for alias in child.names],
+                        relative_level=child.level,
+                    )
+                )
+            else:
+                visit(child, scope)
+
+    visit(tree, [])
+
+
+def scan_project(
+    root: str | Path,
+    *,
+    max_file_bytes: int = 5 * 1024 * 1024,
+    verbose: bool = True,
+) -> ScanReport:
+    """Inventory project files and extract Python symbols/imports safely."""
+    started = time.monotonic()
+    project_root = Path(root).resolve()
+
+    if not project_root.is_dir():
+        raise ValueError(f"Project root is not a directory: {project_root}")
+    if max_file_bytes <= 0:
+        raise ValueError("max_file_bytes must be greater than zero")
+
+    report = ScanReport(root=str(project_root))
+    counters = {
+        "directories": 0,
+        "discovered": 0,
+        "parsed": 0,
+        "skipped": 0,
+    }
+
+    def log(message: str) -> None:
+        if verbose:
+            elapsed = time.monotonic() - started
+            print(f"[{elapsed:7.1f}s] {message}", flush=True)
+
+    def on_walk_error(exc: OSError) -> None:
+        report.errors.append(
+            f"Directory scan failed at {getattr(exc, 'filename', '?')}: {exc}"
+        )
+        log(f"[WARN] Could not access directory: {getattr(exc, 'filename', '?')}")
+
+    log(f"[START] Scanning {project_root}")
+
+    for current, directories, filenames in os.walk(
+        project_root,
+        topdown=True,
+        followlinks=False,
+        onerror=on_walk_error,
+    ):
+        current_path = Path(current)
+        counters["directories"] += 1
+
+        kept_directories = []
+        for name in sorted(directories):
+            candidate = current_path / name
+            try:
+                relative = candidate.relative_to(project_root)
+            except ValueError:
+                continue
+
+            if _excluded_dir(name) or _excluded_relative_dir(relative):
+                log(f"[SKIP DIR] {relative.as_posix()}")
+                continue
+
+            kept_directories.append(name)
+
+        directories[:] = kept_directories
+
+        if counters["directories"] == 1 or counters["directories"] % 25 == 0:
+            log(
+                f"[DISCOVER] Directories visited: {counters['directories']}; "
+                f"files discovered: {counters['discovered']}"
+            )
+
+        for filename in sorted(filenames):
+            path = current_path / filename
+            try:
+                relative = path.relative_to(project_root).as_posix()
+            except ValueError:
+                continue
+
+            if _is_secret(path):
+                counters["skipped"] += 1
+                report.skipped.append(f"{relative}: secret-like filename")
+                continue
+
+            try:
+                if path.is_symlink():
+                    counters["skipped"] += 1
+                    report.skipped.append(f"{relative}: symlink")
+                    continue
+
+                size = path.stat().st_size
+                if size > max_file_bytes:
+                    counters["skipped"] += 1
+                    report.skipped.append(
+                        f"{relative}: exceeds {max_file_bytes} byte limit"
+                    )
+                    continue
+
+                content = path.read_bytes()
+            except OSError as exc:
+                report.errors.append(f"File read failed at {relative}: {exc}")
+                continue
+
+            counters["discovered"] += 1
+            digest = hashlib.sha256(content).hexdigest()
+            language = _language(path)
+
+            report.files.append(
+                FileRecord(
+                    path=relative,
+                    language=language,
+                    size_bytes=size,
+                    sha256=digest,
+                )
+            )
+
+            if language == "python":
+                log(f"[PARSE] {relative}")
+                try:
+                    source = content.decode("utf-8-sig")
+                except UnicodeDecodeError as exc:
+                    report.errors.append(
+                        f"Python file is not UTF-8 at {relative}: {exc}"
+                    )
+                    continue
+
+                _extract_python(relative, source, report)
+                counters["parsed"] += 1
+
+    elapsed = time.monotonic() - started
+    log(
+        f"[DONE] {elapsed:.1f}s | directories={counters['directories']} | "
+        f"files={counters['discovered']} | python_parsed={counters['parsed']} | "
+        f"skipped={counters['skipped']} | errors={len(report.errors)}"
+    )
+
+    if report.errors:
+        log(f"[WARN] Showing at most {MAX_REPORTED_ERRORS} of {len(report.errors)} errors")
+        for error in report.errors[:MAX_REPORTED_ERRORS]:
+            log(f"[ERROR] {error}")
+        remaining = len(report.errors) - MAX_REPORTED_ERRORS
+        if remaining > 0:
+            log(f"[WARN] {remaining} additional errors omitted from console output")
+
+    return report

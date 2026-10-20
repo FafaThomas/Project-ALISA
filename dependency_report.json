@@ -1,0 +1,1007 @@
+{
+  "root": "D:\\Organized Projects\\For Portfolio\\Project-ALISA",
+  "edges": [
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/__init__.py",
+      "line": 3,
+      "imported_module": "scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 2,
+      "imported_module": "__future__",
+      "imported_names": [
+        "annotations"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 4,
+      "imported_module": "",
+      "imported_names": [
+        "sys"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 5,
+      "imported_module": "collections",
+      "imported_names": [
+        "defaultdict"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 6,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "asdict",
+        "dataclass",
+        "field"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 7,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "PurePosixPath"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 9,
+      "imported_module": "scanner",
+      "imported_names": [
+        "ScanReport"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 1,
+      "imported_module": "__future__",
+      "imported_names": [
+        "annotations"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 3,
+      "imported_module": "",
+      "imported_names": [
+        "ast"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 4,
+      "imported_module": "",
+      "imported_names": [
+        "hashlib"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 5,
+      "imported_module": "",
+      "imported_names": [
+        "os"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 6,
+      "imported_module": "",
+      "imported_names": [
+        "time"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 7,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "asdict",
+        "dataclass",
+        "field"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 8,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+      "line": 4,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+      "line": 5,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+      "line": 1,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+      "line": 3,
+      "imported_module": "codebase_interpreter_agent",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/__init__.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+      "line": 63,
+      "imported_module": "",
+      "imported_names": [
+        "pytest"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/__init__.py",
+      "line": 1,
+      "imported_module": "pipeline",
+      "imported_names": [
+        "IngestionPipeline"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/__init__.py",
+      "line": 2,
+      "imported_module": "factions",
+      "imported_names": [
+        "FactionRegistry",
+        "Faction"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/__init__.py",
+      "line": 3,
+      "imported_module": "retrieval",
+      "imported_names": [
+        "FactionRetriever"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+      "line": 8,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "dataclass"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+      "line": 9,
+      "imported_module": "typing",
+      "imported_names": [
+        "Protocol"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/artifact_stubs.py",
+      "line": 1,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "argparse",
+        "os"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "line": 2,
+      "imported_module": "factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "line": 3,
+      "imported_module": "pipeline",
+      "imported_names": [
+        "IngestionPipeline"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "line": 4,
+      "imported_module": "indexing",
+      "imported_names": [
+        "NoopIndexer",
+        "OllamaQdrantIndexer"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "csv",
+        "json",
+        "mimetypes"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py",
+      "line": 1,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "dataclass"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+      "line": 10,
+      "imported_module": "qdrant_client",
+      "imported_names": [
+        "QdrantClient",
+        "models"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+      "line": 11,
+      "imported_module": "",
+      "imported_names": [
+        "urllib.request",
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+      "line": 53,
+      "imported_module": "qdrant_client.http",
+      "imported_names": [
+        "models"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+      "line": 1,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "dataclass",
+        "field",
+        "asdict"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+      "line": 2,
+      "imported_module": "typing",
+      "imported_names": [
+        "Any"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "hashlib"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 2,
+      "imported_module": "",
+      "imported_names": [
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 3,
+      "imported_module": "",
+      "imported_names": [
+        "os"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 4,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 6,
+      "imported_module": "factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 7,
+      "imported_module": "models",
+      "imported_names": [
+        "Chunk",
+        "IngestionReport"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 8,
+      "imported_module": "agent_context",
+      "imported_names": [
+        "AgentIdentity"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 9,
+      "imported_module": "extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 10,
+      "imported_module": "indexing",
+      "imported_names": [
+        "NoopIndexer"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 11,
+      "imported_module": "artifact_stubs",
+      "imported_names": [
+        "make_artifact_stub"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/artifact_stubs.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "line": 5,
+      "imported_module": "factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "line": 6,
+      "imported_module": "qdrant_client",
+      "imported_names": [
+        "QdrantClient"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "line": 7,
+      "imported_module": "",
+      "imported_names": [
+        "urllib.request",
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "line": 43,
+      "imported_module": "qdrant_client.http",
+      "imported_names": [
+        "models"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/search_cli.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "argparse",
+        "os",
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/search_cli.py",
+      "line": 2,
+      "imported_module": "retrieval",
+      "imported_names": [
+        "FactionRetriever"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "os"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+      "line": 14,
+      "imported_module": "",
+      "imported_names": [
+        "requests"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "pytest"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "line": 3,
+      "imported_module": "src.knowledge_ingestion_service.agent_context",
+      "imported_names": [
+        "AgentIdentity"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "line": 4,
+      "imported_module": "src.knowledge_ingestion_service.pipeline",
+      "imported_names": [
+        "IngestionPipeline"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "line": 140,
+      "imported_module": "src.knowledge_ingestion_service.models",
+      "imported_names": [
+        "Chunk"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_factions.py",
+      "line": 1,
+      "imported_module": "src.knowledge_ingestion_service.factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 2,
+      "imported_module": "",
+      "imported_names": [
+        "pytest"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 3,
+      "imported_module": "src.knowledge_ingestion_service.pipeline",
+      "imported_names": [
+        "IngestionPipeline"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 190,
+      "imported_module": "src.knowledge_ingestion_service.pipeline",
+      "imported_names": [
+        "_make_stub_chunks"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 191,
+      "imported_module": "src.knowledge_ingestion_service.factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 214,
+      "imported_module": "src.knowledge_ingestion_service.extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 230,
+      "imported_module": "src.knowledge_ingestion_service.extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 241,
+      "imported_module": "src.knowledge_ingestion_service.extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 254,
+      "imported_module": "src.knowledge_ingestion_service.extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 264,
+      "imported_module": "src.knowledge_ingestion_service.pipeline",
+      "imported_names": [
+        "_discover"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    }
+  ]
+}
