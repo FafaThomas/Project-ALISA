@@ -20,6 +20,10 @@ from codebase_interpreter_agent.evidence_assembly import (
     assemble_symbol_evidence,
 )
 
+from codebase_interpreter_agent.interpretation import (
+    interpret_codebase_question,
+)
+
 
 def _load_codebase_map(path: Path) -> dict:
     if not path.is_file():
@@ -120,6 +124,16 @@ def main() -> int:
         "--json",
         action="store_true",
         help="Print the complete result as JSON.",
+    )
+
+    query_parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help=(
+            "Project root used to retrieve source for LLM interpretation. "
+            "Defaults to the root recorded in the map, if available."
+        ),
     )
 
     scan_parser = subparsers.add_parser(
@@ -239,6 +253,7 @@ def main() -> int:
         help="Print the complete result as JSON.",
     )
 
+
     args = parser.parse_args()
 
     try:
@@ -249,7 +264,6 @@ def main() -> int:
                 output,
                 quiet=args.quiet,
             )
-
 
         if args.command == "docs":
             codebase_map = _load_codebase_map(args.map_path)
@@ -315,7 +329,6 @@ def main() -> int:
 
             return 0 if result["status"] == "retrieved" else 1
 
-        
         if args.command == "evidence":
             if args.context_lines < 0:
                 raise ValueError("--context-lines cannot be negative.")
@@ -378,12 +391,36 @@ def main() -> int:
                 "ambiguous",
             } else 1
 
-
         codebase_map = _load_codebase_map(args.map_path)
         result = answer_codebase_question(
             codebase_map,
             args.question,
         )
+
+        # Preserve deterministic answers. Use the LLM only when the
+        # deterministic query engine cannot adequately answer.
+        if result["status"] in {"unsupported", "no_match"}:
+            recorded_root = codebase_map.get("root")
+            project_root = args.root
+
+            if project_root is None and isinstance(recorded_root, str):
+                project_root = Path(recorded_root)
+
+            if project_root is None:
+                result = {
+                    "status": "root_required",
+                    "answer": (
+                        "LLM interpretation requires the project root. "
+                        "Rerun the query with --root <project-directory>."
+                    ),
+                    "evidence": [],
+                }
+            else:
+                result = interpret_codebase_question(
+                    codebase_map,
+                    project_root,
+                    args.question,
+                )
 
         if args.json:
             print(json.dumps(result, indent=2))
@@ -400,11 +437,18 @@ def main() -> int:
                         or item.get("source_path")
                         or "unknown"
                     )
-                    line = item.get("line")
-                    location = f"{path}:{line}" if line else path
+                    line = item.get("line") or item.get("start_line")
+                    end_line = item.get("end_line")
+                    if line and end_line and end_line != line:
+                        location = f"{path}:{line}-{end_line}"
+                    else:
+                        location = f"{path}:{line}" if line else path
                     print(f"  - {location}")
 
-        return 0
+            for error in result.get("errors", []):
+                print(f"Warning: {error}")
+
+        return 0 if result["status"] == "answered" else 1
 
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
