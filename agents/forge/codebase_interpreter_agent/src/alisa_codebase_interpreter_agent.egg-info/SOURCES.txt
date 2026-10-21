@@ -3,8 +3,17 @@ pyproject.toml
 src/alisa_codebase_interpreter_agent.egg-info/PKG-INFO
 src/alisa_codebase_interpreter_agent.egg-info/SOURCES.txt
 src/alisa_codebase_interpreter_agent.egg-info/dependency_links.txt
+src/alisa_codebase_interpreter_agent.egg-info/entry_points.txt
 src/alisa_codebase_interpreter_agent.egg-info/requires.txt
 src/alisa_codebase_interpreter_agent.egg-info/top_level.txt
 src/codebase_interpreter_agent/__init__.py
+src/codebase_interpreter_agent/cli.py
+src/codebase_interpreter_agent/codebase_map.py
+src/codebase_interpreter_agent/codebase_queries.py
+src/codebase_interpreter_agent/dependency_resolver.py
 src/codebase_interpreter_agent/scanner.py
+tests/test_codebase_map.py
+tests/test_codebase_queries.py
+tests/test_codebase_question.py
+tests/test_dependency_resolver.py
 tests/test_scanner.py

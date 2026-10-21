@@ -36,8 +36,8 @@
     {
       "path": "agents/forge/codebase_interpreter_agent/pyproject.toml",
       "language": "toml",
-      "size_bytes": 440,
-      "sha256": "18fee63f868afda5d7ffa272e490122075e09253cecef8e9b40187070e7c3481",
+      "size_bytes": 521,
+      "sha256": "c93917b12bc8c03c75b1ca0760763d69e6ac4882699332200f563408dbbd14a0",
       "status": "inventoried",
       "symbols": []
     },
@@ -48,6 +48,45 @@
       "sha256": "f173548b3bcb60d3592c522e2efda3256dea0d934c86eefcde7c3f4576091c39",
       "status": "analyzed",
       "symbols": []
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "language": "python",
+      "size_bytes": 5147,
+      "sha256": "9bb2363ff948191de6ec3bcb8d2d038da493a43489c32e256ccb5af87b2ab8ee",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+          "name": "_load_codebase_map",
+          "qualified_name": "_load_codebase_map",
+          "kind": "function",
+          "line": 15,
+          "end_line": 28,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+          "name": "_run_scan",
+          "qualified_name": "_run_scan",
+          "kind": "function",
+          "line": 31,
+          "end_line": 84,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+          "name": "main",
+          "qualified_name": "main",
+          "kind": "function",
+          "line": 87,
+          "end_line": 177,
+          "decorators": [],
+          "bases": []
+        }
+      ]
     },
     {
       "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
@@ -95,6 +134,55 @@
           "kind": "function",
           "line": 27,
           "end_line": 104,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+      "language": "python",
+      "size_bytes": 7384,
+      "sha256": "4e79074cb9cd2c4a63a42254bdfcba9becb8c6a1adec2e2da625bd9b40812a06",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+          "name": "_normalize_path",
+          "qualified_name": "_normalize_path",
+          "kind": "function",
+          "line": 5,
+          "end_line": 6,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+          "name": "find_symbol",
+          "qualified_name": "find_symbol",
+          "kind": "function",
+          "line": 9,
+          "end_line": 42,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+          "name": "find_dependents",
+          "qualified_name": "find_dependents",
+          "kind": "function",
+          "line": 45,
+          "end_line": 79,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+          "name": "answer_codebase_question",
+          "qualified_name": "answer_codebase_question",
+          "kind": "function",
+          "line": 82,
+          "end_line": 254,
           "decorators": [],
           "bases": []
         }
@@ -430,6 +518,104 @@
           "kind": "function",
           "line": 63,
           "end_line": 87,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "language": "python",
+      "size_bytes": 2147,
+      "sha256": "970d2608e813bbccd8f4f4cd7a77606186f2404cec73086f96ec6006694792e9",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+          "name": "_make_map",
+          "qualified_name": "_make_map",
+          "kind": "function",
+          "line": 13,
+          "end_line": 36,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+          "name": "test_finds_symbol_with_source_location",
+          "qualified_name": "test_finds_symbol_with_source_location",
+          "kind": "function",
+          "line": 39,
+          "end_line": 52,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+          "name": "test_finds_dependents_of_local_module",
+          "qualified_name": "test_finds_dependents_of_local_module",
+          "kind": "function",
+          "line": 55,
+          "end_line": 68,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+          "name": "test_missing_symbol_returns_no_matches",
+          "qualified_name": "test_missing_symbol_returns_no_matches",
+          "kind": "function",
+          "line": 71,
+          "end_line": 77,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "language": "python",
+      "size_bytes": 2133,
+      "sha256": "5ae4e666cff21853dfba8298335f95d13e36f506ce86fd7137549d64f42d82a0",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+          "name": "_make_map",
+          "qualified_name": "_make_map",
+          "kind": "function",
+          "line": 12,
+          "end_line": 33,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+          "name": "test_answers_where_symbol_is_defined",
+          "qualified_name": "test_answers_where_symbol_is_defined",
+          "kind": "function",
+          "line": 36,
+          "end_line": 46,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+          "name": "test_answers_which_files_depend_on_symbol",
+          "qualified_name": "test_answers_which_files_depend_on_symbol",
+          "kind": "function",
+          "line": 49,
+          "end_line": 62,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+          "name": "test_unknown_symbol_does_not_invent_evidence",
+          "qualified_name": "test_unknown_symbol_does_not_invent_evidence",
+          "kind": "function",
+          "line": 65,
+          "end_line": 74,
           "decorators": [],
           "bases": []
         }
@@ -1871,6 +2057,118 @@
       "note": "Matched against inventoried Python module paths."
     },
     {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 2,
+      "imported_module": "",
+      "imported_names": [
+        "argparse"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 3,
+      "imported_module": "",
+      "imported_names": [
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 4,
+      "imported_module": "",
+      "imported_names": [
+        "sys"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 5,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 7,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 8,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 9,
+      "imported_module": "codebase_interpreter_agent.codebase_map",
+      "imported_names": [
+        "build_codebase_map"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 10,
+      "imported_module": "codebase_interpreter_agent.codebase_queries",
+      "imported_names": [
+        "answer_codebase_question"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
       "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
       "line": 2,
       "imported_module": "__future__",
@@ -1927,6 +2225,19 @@
       ],
       "classification": "local",
       "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+      "line": 2,
+      "imported_module": "__future__",
+      "imported_names": [
+        "annotations"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
     },
     {
       "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
@@ -2173,6 +2484,153 @@
       "target_paths": [],
       "classification": "standard_library",
       "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 4,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 5,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 6,
+      "imported_module": "codebase_interpreter_agent.codebase_map",
+      "imported_names": [
+        "build_codebase_map"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 7,
+      "imported_module": "codebase_interpreter_agent.codebase_queries",
+      "imported_names": [
+        "find_dependents",
+        "find_symbol"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 4,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 5,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 6,
+      "imported_module": "codebase_interpreter_agent.codebase_map",
+      "imported_names": [
+        "build_codebase_map"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 7,
+      "imported_module": "codebase_interpreter_agent.codebase_queries",
+      "imported_names": [
+        "answer_codebase_question"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
     },
     {
       "source_path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
@@ -3007,11 +3465,11 @@
     "services/knowledge_ingestion_service/tests/test_pipeline.py.bak-egg-info: generated artifact or backup"
   ],
   "summary": {
-    "file_count": 35,
-    "symbol_count": 152,
-    "import_edge_count": 80,
-    "local_edge_count": 36,
-    "external_edge_count": 44,
+    "file_count": 39,
+    "symbol_count": 167,
+    "import_edge_count": 99,
+    "local_edge_count": 48,
+    "external_edge_count": 51,
     "unresolved_edge_count": 0,
     "parse_error_count": 0
   }

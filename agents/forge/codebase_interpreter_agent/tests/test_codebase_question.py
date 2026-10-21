@@ -1,10 +1,10 @@
 
 from pathlib import Path
 
-from codebase_interpreter_agent.scanner import scan_project
-from codebase_interpreter_agent.dependency_resolver import resolve_imports
-from codebase_interpreter_agent.codebase_map import build_codebase_map
-from codebase_interpreter_agent.codebase_queries import (
+from src.codebase_interpreter_agent.scanner import scan_project
+from src.codebase_interpreter_agent.dependency_resolver import resolve_imports
+from src.codebase_interpreter_agent.codebase_map import build_codebase_map
+from src.codebase_interpreter_agent.codebase_queries import (
     answer_codebase_question,
 )
 

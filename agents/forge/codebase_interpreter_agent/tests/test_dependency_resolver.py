@@ -1,8 +1,8 @@
 
 from pathlib import Path
 
-from codebase_interpreter_agent.dependency_resolver import resolve_imports
-from codebase_interpreter_agent.scanner import scan_project
+from src.codebase_interpreter_agent.dependency_resolver import resolve_imports
+from src.codebase_interpreter_agent.scanner import scan_project
 
 
 def test_resolves_absolute_local_imports(tmp_path: Path):
