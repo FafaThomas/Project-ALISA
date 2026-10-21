@@ -1,0 +1,3476 @@
+{
+  "root": "D:\\Organized Projects\\For Portfolio\\Project-ALISA",
+  "nodes": [
+    {
+      "path": ".gitignore",
+      "language": "other",
+      "size_bytes": 2328,
+      "sha256": "eef4c8b73a654862f7fd2a890e39f7ec29cfc50872a0a21cf3446663b66f43b1",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "Development.MD",
+      "language": "markdown",
+      "size_bytes": 12777,
+      "sha256": "1be31acc3491c9c1eef7029fbd0b98c8b9f7f0ee81b494058a1e3b8298c1ebf9",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "README.MD",
+      "language": "markdown",
+      "size_bytes": 19778,
+      "sha256": "342ab965bc1a1df188e19b3686374c1c6127d2d9d4b24a7454d69e45c49cceab",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/README.md",
+      "language": "markdown",
+      "size_bytes": 730,
+      "sha256": "66703eed78639c38208a22283f8f18e2dce5db2e148559c5ee05c696e7786593",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/pyproject.toml",
+      "language": "toml",
+      "size_bytes": 521,
+      "sha256": "c93917b12bc8c03c75b1ca0760763d69e6ac4882699332200f563408dbbd14a0",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/__init__.py",
+      "language": "python",
+      "size_bytes": 143,
+      "sha256": "f173548b3bcb60d3592c522e2efda3256dea0d934c86eefcde7c3f4576091c39",
+      "status": "analyzed",
+      "symbols": []
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "language": "python",
+      "size_bytes": 5147,
+      "sha256": "9bb2363ff948191de6ec3bcb8d2d038da493a43489c32e256ccb5af87b2ab8ee",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+          "name": "_load_codebase_map",
+          "qualified_name": "_load_codebase_map",
+          "kind": "function",
+          "line": 15,
+          "end_line": 28,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+          "name": "_run_scan",
+          "qualified_name": "_run_scan",
+          "kind": "function",
+          "line": 31,
+          "end_line": 84,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+          "name": "main",
+          "qualified_name": "main",
+          "kind": "function",
+          "line": 87,
+          "end_line": 177,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+      "language": "python",
+      "size_bytes": 2868,
+      "sha256": "a0dd05e05ff93ba72dd0328ed2ad5a004e033f7e9c47927b0c9c7b06786a5e78",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+          "name": "_normalize_path",
+          "qualified_name": "_normalize_path",
+          "kind": "function",
+          "line": 10,
+          "end_line": 11,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+          "name": "CodebaseMap",
+          "qualified_name": "CodebaseMap",
+          "kind": "class",
+          "line": 15,
+          "end_line": 24,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+          "name": "to_dict",
+          "qualified_name": "CodebaseMap.to_dict",
+          "kind": "function",
+          "line": 23,
+          "end_line": 24,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+          "name": "build_codebase_map",
+          "qualified_name": "build_codebase_map",
+          "kind": "function",
+          "line": 27,
+          "end_line": 104,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+      "language": "python",
+      "size_bytes": 7384,
+      "sha256": "4e79074cb9cd2c4a63a42254bdfcba9becb8c6a1adec2e2da625bd9b40812a06",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+          "name": "_normalize_path",
+          "qualified_name": "_normalize_path",
+          "kind": "function",
+          "line": 5,
+          "end_line": 6,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+          "name": "find_symbol",
+          "qualified_name": "find_symbol",
+          "kind": "function",
+          "line": 9,
+          "end_line": 42,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+          "name": "find_dependents",
+          "qualified_name": "find_dependents",
+          "kind": "function",
+          "line": 45,
+          "end_line": 79,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+          "name": "answer_codebase_question",
+          "qualified_name": "answer_codebase_question",
+          "kind": "function",
+          "line": 82,
+          "end_line": 254,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "language": "python",
+      "size_bytes": 8610,
+      "sha256": "f7ff7c17ff736a3b79e9e7a0ce99d4f8acfded1a2b5963ede367ed92eedac2bd",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "DependencyEdge",
+          "qualified_name": "DependencyEdge",
+          "kind": "class",
+          "line": 13,
+          "end_line": 22,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "DependencyReport",
+          "qualified_name": "DependencyReport",
+          "kind": "class",
+          "line": 26,
+          "end_line": 45,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "to_dict",
+          "qualified_name": "DependencyReport.to_dict",
+          "kind": "function",
+          "line": 30,
+          "end_line": 31,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "local_edges",
+          "qualified_name": "DependencyReport.local_edges",
+          "kind": "function",
+          "line": 34,
+          "end_line": 38,
+          "decorators": [
+            "property"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "external_edges",
+          "qualified_name": "DependencyReport.external_edges",
+          "kind": "function",
+          "line": 41,
+          "end_line": 45,
+          "decorators": [
+            "property"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "_ModuleIndex",
+          "qualified_name": "_ModuleIndex",
+          "kind": "class",
+          "line": 49,
+          "end_line": 53,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "_module_and_root",
+          "qualified_name": "_module_and_root",
+          "kind": "function",
+          "line": 56,
+          "end_line": 81,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "_build_index",
+          "qualified_name": "_build_index",
+          "kind": "function",
+          "line": 85,
+          "end_line": 131,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "_relative_module",
+          "qualified_name": "_relative_module",
+          "kind": "function",
+          "line": 134,
+          "end_line": 155,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "_find_local",
+          "qualified_name": "_find_local",
+          "kind": "function",
+          "line": 158,
+          "end_line": 175,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+          "name": "resolve_imports",
+          "qualified_name": "resolve_imports",
+          "kind": "function",
+          "line": 178,
+          "end_line": 289,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "language": "python",
+      "size_bytes": 12099,
+      "sha256": "15b3734284ce59e0521f8aa43caface349a395e8e8e3708682fb7a0612335b9e",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "_is_generated_artifact",
+          "qualified_name": "_is_generated_artifact",
+          "kind": "function",
+          "line": 47,
+          "end_line": 55,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "FileRecord",
+          "qualified_name": "FileRecord",
+          "kind": "class",
+          "line": 60,
+          "end_line": 65,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "Symbol",
+          "qualified_name": "Symbol",
+          "kind": "class",
+          "line": 69,
+          "end_line": 77,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "ImportReference",
+          "qualified_name": "ImportReference",
+          "kind": "class",
+          "line": 81,
+          "end_line": 86,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "ScanReport",
+          "qualified_name": "ScanReport",
+          "kind": "class",
+          "line": 90,
+          "end_line": 99,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "to_dict",
+          "qualified_name": "ScanReport.to_dict",
+          "kind": "function",
+          "line": 98,
+          "end_line": 99,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "_excluded_dir",
+          "qualified_name": "_excluded_dir",
+          "kind": "function",
+          "line": 102,
+          "end_line": 103,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "_excluded_relative_dir",
+          "qualified_name": "_excluded_relative_dir",
+          "kind": "function",
+          "line": 106,
+          "end_line": 111,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "_is_secret",
+          "qualified_name": "_is_secret",
+          "kind": "function",
+          "line": 114,
+          "end_line": 120,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "_language",
+          "qualified_name": "_language",
+          "kind": "function",
+          "line": 123,
+          "end_line": 159,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "_name",
+          "qualified_name": "_name",
+          "kind": "function",
+          "line": 162,
+          "end_line": 166,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "_extract_python",
+          "qualified_name": "_extract_python",
+          "kind": "function",
+          "line": 169,
+          "end_line": 231,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "visit",
+          "qualified_name": "_extract_python.visit",
+          "kind": "function",
+          "line": 182,
+          "end_line": 228,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "scan_project",
+          "qualified_name": "scan_project",
+          "kind": "function",
+          "line": 234,
+          "end_line": 394,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "log",
+          "qualified_name": "scan_project.log",
+          "kind": "function",
+          "line": 257,
+          "end_line": 260,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+          "name": "on_walk_error",
+          "qualified_name": "scan_project.on_walk_error",
+          "kind": "function",
+          "line": 262,
+          "end_line": 266,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_map.py",
+      "language": "python",
+      "size_bytes": 2373,
+      "sha256": "cfed21fc60f22157a0acb5199b4416ca7e9972db11e560d02dc73a8cb5b95510",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_map.py",
+          "name": "test_builds_codebase_map_with_symbols_and_dependencies",
+          "qualified_name": "test_builds_codebase_map_with_symbols_and_dependencies",
+          "kind": "function",
+          "line": 9,
+          "end_line": 60,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_map.py",
+          "name": "test_codebase_map_serializes_to_json",
+          "qualified_name": "test_codebase_map_serializes_to_json",
+          "kind": "function",
+          "line": 63,
+          "end_line": 87,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "language": "python",
+      "size_bytes": 2147,
+      "sha256": "970d2608e813bbccd8f4f4cd7a77606186f2404cec73086f96ec6006694792e9",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+          "name": "_make_map",
+          "qualified_name": "_make_map",
+          "kind": "function",
+          "line": 13,
+          "end_line": 36,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+          "name": "test_finds_symbol_with_source_location",
+          "qualified_name": "test_finds_symbol_with_source_location",
+          "kind": "function",
+          "line": 39,
+          "end_line": 52,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+          "name": "test_finds_dependents_of_local_module",
+          "qualified_name": "test_finds_dependents_of_local_module",
+          "kind": "function",
+          "line": 55,
+          "end_line": 68,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+          "name": "test_missing_symbol_returns_no_matches",
+          "qualified_name": "test_missing_symbol_returns_no_matches",
+          "kind": "function",
+          "line": 71,
+          "end_line": 77,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "language": "python",
+      "size_bytes": 2133,
+      "sha256": "5ae4e666cff21853dfba8298335f95d13e36f506ce86fd7137549d64f42d82a0",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+          "name": "_make_map",
+          "qualified_name": "_make_map",
+          "kind": "function",
+          "line": 12,
+          "end_line": 33,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+          "name": "test_answers_where_symbol_is_defined",
+          "qualified_name": "test_answers_where_symbol_is_defined",
+          "kind": "function",
+          "line": 36,
+          "end_line": 46,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+          "name": "test_answers_which_files_depend_on_symbol",
+          "qualified_name": "test_answers_which_files_depend_on_symbol",
+          "kind": "function",
+          "line": 49,
+          "end_line": 62,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+          "name": "test_unknown_symbol_does_not_invent_evidence",
+          "qualified_name": "test_unknown_symbol_does_not_invent_evidence",
+          "kind": "function",
+          "line": 65,
+          "end_line": 74,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+      "language": "python",
+      "size_bytes": 3683,
+      "sha256": "6187669c20e2e37a0694ad3a5944e615dc489dd1a60b7aff61468683ba09ce67",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+          "name": "test_resolves_absolute_local_imports",
+          "qualified_name": "test_resolves_absolute_local_imports",
+          "kind": "function",
+          "line": 8,
+          "end_line": 34,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+          "name": "test_resolves_relative_imports",
+          "qualified_name": "test_resolves_relative_imports",
+          "kind": "function",
+          "line": 37,
+          "end_line": 65,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+          "name": "test_classifies_standard_library_and_unresolved_relative_import",
+          "qualified_name": "test_classifies_standard_library_and_unresolved_relative_import",
+          "kind": "function",
+          "line": 68,
+          "end_line": 95,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+          "name": "test_resolves_src_prefixed_imports",
+          "qualified_name": "test_resolves_src_prefixed_imports",
+          "kind": "function",
+          "line": 98,
+          "end_line": 125,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+      "language": "python",
+      "size_bytes": 3400,
+      "sha256": "209b740b492da504b6b3e145774cb98f3836cf6c0d50654f43a51bc20a07ba1b",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+          "name": "test_scans_python_symbols_and_imports",
+          "qualified_name": "test_scans_python_symbols_and_imports",
+          "kind": "function",
+          "line": 6,
+          "end_line": 26,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+          "name": "test_excludes_secrets_and_generated_directories",
+          "qualified_name": "test_excludes_secrets_and_generated_directories",
+          "kind": "function",
+          "line": 29,
+          "end_line": 39,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+          "name": "test_parse_error_is_reported_without_aborting_scan",
+          "qualified_name": "test_parse_error_is_reported_without_aborting_scan",
+          "kind": "function",
+          "line": 42,
+          "end_line": 50,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+          "name": "test_large_file_is_skipped",
+          "qualified_name": "test_large_file_is_skipped",
+          "kind": "function",
+          "line": 53,
+          "end_line": 59,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+          "name": "test_invalid_root_and_size_limit_are_rejected",
+          "qualified_name": "test_invalid_root_and_size_limit_are_rejected",
+          "kind": "function",
+          "line": 62,
+          "end_line": 69,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+          "name": "test_excludes_packaging_metadata_and_analysis_artifacts",
+          "qualified_name": "test_excludes_packaging_metadata_and_analysis_artifacts",
+          "kind": "function",
+          "line": 71,
+          "end_line": 109,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "database/docker-compose.yml",
+      "language": "yaml",
+      "size_bytes": 1223,
+      "sha256": "1a82a98d86ea8321ca0d1df9b1a2deebccebac1ce46dedffe4734dfc8bb3293d",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "database/down.ps1",
+      "language": "powershell",
+      "size_bytes": 159,
+      "sha256": "4d7072a06557c10d72e050d607aec9353768af2d60523ed418aa9a81028654f5",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "database/up.ps1",
+      "language": "powershell",
+      "size_bytes": 160,
+      "sha256": "8f85377e25e188dc793f003f62550f6b9576576c6b00545f46d8955c397c8191",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "services/knowledge_ingestion_service/.gitignore",
+      "language": "other",
+      "size_bytes": 56,
+      "sha256": "85634734790f345c2fd9b146c0bff82349cf007942fc717c16b1de559e08f42d",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "services/knowledge_ingestion_service/README.md",
+      "language": "markdown",
+      "size_bytes": 1914,
+      "sha256": "b269e462f45ca9c77b2fc889978aced2483e7e532ddd556443f7e32524da7987",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "services/knowledge_ingestion_service/TEST_RESULTS.txt",
+      "language": "other",
+      "size_bytes": 1243,
+      "sha256": "4c776cb2f8860f6c5fe588d5a350efd1764205d7c2d1cb50c85ba66e5acc5328",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "services/knowledge_ingestion_service/docs/MIGRATION_PLAN.md",
+      "language": "markdown",
+      "size_bytes": 1615,
+      "sha256": "69dd4a1168d2927e9f6638d695d4955cf8d857f1649fb69d6f25e387f563f751",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "services/knowledge_ingestion_service/pyproject.toml",
+      "language": "toml",
+      "size_bytes": 555,
+      "sha256": "c48e3d229b24861fc352cc5c733227d1062ac85b056be02b47dc2d392c2bbca3",
+      "status": "inventoried",
+      "symbols": []
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/__init__.py",
+      "language": "python",
+      "size_bytes": 209,
+      "sha256": "ee70144587857e64e8894f07a10566e28f7adf9501d2308e0d54a09d948e326c",
+      "status": "analyzed",
+      "symbols": []
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+      "language": "python",
+      "size_bytes": 1103,
+      "sha256": "167c41e6e6080d3c5ffcff6817adcb492f1ed0a7ac718f7498c45ef215a3fa5b",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+          "name": "AgentIdentity",
+          "qualified_name": "AgentIdentity",
+          "kind": "class",
+          "line": 13,
+          "end_line": 17,
+          "decorators": [
+            "dataclass(frozen=True)"
+          ],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+          "name": "AgentIdentityProvider",
+          "qualified_name": "AgentIdentityProvider",
+          "kind": "class",
+          "line": 20,
+          "end_line": 25,
+          "decorators": [],
+          "bases": [
+            "Protocol"
+          ]
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+          "name": "resolve_current_agent_id",
+          "qualified_name": "AgentIdentityProvider.resolve_current_agent_id",
+          "kind": "function",
+          "line": 23,
+          "end_line": 25,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+          "name": "AgentRegistry",
+          "qualified_name": "AgentRegistry",
+          "kind": "class",
+          "line": 28,
+          "end_line": 33,
+          "decorators": [],
+          "bases": [
+            "Protocol"
+          ]
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+          "name": "get_agent",
+          "qualified_name": "AgentRegistry.get_agent",
+          "kind": "function",
+          "line": 31,
+          "end_line": 33,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/artifact_stubs.py",
+      "language": "python",
+      "size_bytes": 3770,
+      "sha256": "8e82e4a5015e80e35bb789b960328cc30e8e1d5f5d2761e3414246c76309e2a3",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/artifact_stubs.py",
+          "name": "infer_artifact_category",
+          "qualified_name": "infer_artifact_category",
+          "kind": "function",
+          "line": 58,
+          "end_line": 72,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/artifact_stubs.py",
+          "name": "make_artifact_stub",
+          "qualified_name": "make_artifact_stub",
+          "kind": "function",
+          "line": 75,
+          "end_line": 126,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "language": "python",
+      "size_bytes": 1636,
+      "sha256": "8451e3d6282c8ef05c896ca0f080552b79cd44916a1517b25c3cd5fce5f9f3e1",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+          "name": "main",
+          "qualified_name": "main",
+          "kind": "function",
+          "line": 6,
+          "end_line": 27,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py",
+      "language": "python",
+      "size_bytes": 2697,
+      "sha256": "ea21cefcd498b71b5cdcc7bfe0ce4490a0b888e24e2fdc167310ec690a60c447",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py",
+          "name": "_read_text",
+          "qualified_name": "_read_text",
+          "kind": "function",
+          "line": 34,
+          "end_line": 42,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py",
+          "name": "extract",
+          "qualified_name": "extract",
+          "kind": "function",
+          "line": 45,
+          "end_line": 71,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py",
+      "language": "python",
+      "size_bytes": 1168,
+      "sha256": "7e455904cfdc86f5c7b664c8104bc9333512c8c9b07e6e3b0cc536bfd1a34eb9",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py",
+          "name": "Faction",
+          "qualified_name": "Faction",
+          "kind": "class",
+          "line": 4,
+          "end_line": 7,
+          "decorators": [
+            "dataclass(frozen=True)"
+          ],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py",
+          "name": "FactionRegistry",
+          "qualified_name": "FactionRegistry",
+          "kind": "class",
+          "line": 9,
+          "end_line": 27,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py",
+          "name": "__init__",
+          "qualified_name": "FactionRegistry.__init__",
+          "kind": "function",
+          "line": 11,
+          "end_line": 18,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py",
+          "name": "get",
+          "qualified_name": "FactionRegistry.get",
+          "kind": "function",
+          "line": 20,
+          "end_line": 24,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py",
+          "name": "all",
+          "qualified_name": "FactionRegistry.all",
+          "kind": "function",
+          "line": 26,
+          "end_line": 27,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+      "language": "python",
+      "size_bytes": 3725,
+      "sha256": "56729c4c0a45d43ba016930328e39958d8529ee4eedeb567d6003d18d4884a1c",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+          "name": "NoopIndexer",
+          "qualified_name": "NoopIndexer",
+          "kind": "class",
+          "line": 1,
+          "end_line": 5,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+          "name": "upsert",
+          "qualified_name": "NoopIndexer.upsert",
+          "kind": "function",
+          "line": 2,
+          "end_line": 3,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+          "name": "reconcile_source",
+          "qualified_name": "NoopIndexer.reconcile_source",
+          "kind": "function",
+          "line": 4,
+          "end_line": 5,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+          "name": "OllamaQdrantIndexer",
+          "qualified_name": "OllamaQdrantIndexer",
+          "kind": "class",
+          "line": 7,
+          "end_line": 94,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+          "name": "__init__",
+          "qualified_name": "OllamaQdrantIndexer.__init__",
+          "kind": "function",
+          "line": 9,
+          "end_line": 31,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+          "name": "_embed",
+          "qualified_name": "OllamaQdrantIndexer._embed",
+          "kind": "function",
+          "line": 33,
+          "end_line": 41,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+          "name": "upsert",
+          "qualified_name": "OllamaQdrantIndexer.upsert",
+          "kind": "function",
+          "line": 43,
+          "end_line": 49,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+          "name": "reconcile_source",
+          "qualified_name": "OllamaQdrantIndexer.reconcile_source",
+          "kind": "function",
+          "line": 51,
+          "end_line": 94,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+      "language": "python",
+      "size_bytes": 1464,
+      "sha256": "d2b1f798e02d59aafea9cada1e7f58ab0e5bef4eb1b5812a1554012fea69fd36",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+          "name": "Chunk",
+          "qualified_name": "Chunk",
+          "kind": "class",
+          "line": 5,
+          "end_line": 31,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+          "name": "payload",
+          "qualified_name": "Chunk.payload",
+          "kind": "function",
+          "line": 18,
+          "end_line": 31,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+          "name": "IngestionReport",
+          "qualified_name": "IngestionReport",
+          "kind": "class",
+          "line": 34,
+          "end_line": 52,
+          "decorators": [
+            "dataclass"
+          ],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+          "name": "to_dict",
+          "qualified_name": "IngestionReport.to_dict",
+          "kind": "function",
+          "line": 51,
+          "end_line": 52,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "language": "python",
+      "size_bytes": 18053,
+      "sha256": "bb6082039f221ff5d96ac7269fffa693a7d017162f34c15a10f4add7ba9a93b5",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "_excluded_path",
+          "qualified_name": "_excluded_path",
+          "kind": "function",
+          "line": 75,
+          "end_line": 80,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "_excluded",
+          "qualified_name": "_excluded",
+          "kind": "function",
+          "line": 83,
+          "end_line": 93,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "_discover",
+          "qualified_name": "_discover",
+          "kind": "function",
+          "line": 97,
+          "end_line": 124,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "onerror",
+          "qualified_name": "_discover.onerror",
+          "kind": "function",
+          "line": 103,
+          "end_line": 107,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "_chunks",
+          "qualified_name": "_chunks",
+          "kind": "function",
+          "line": 128,
+          "end_line": 202,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "_artifact_id",
+          "qualified_name": "_artifact_id",
+          "kind": "function",
+          "line": 205,
+          "end_line": 208,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "_make_stub_chunks",
+          "qualified_name": "_make_stub_chunks",
+          "kind": "function",
+          "line": 211,
+          "end_line": 252,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "_relative_path",
+          "qualified_name": "_relative_path",
+          "kind": "function",
+          "line": 255,
+          "end_line": 263,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "IngestionPipeline",
+          "qualified_name": "IngestionPipeline",
+          "kind": "class",
+          "line": 266,
+          "end_line": 593,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "__init__",
+          "qualified_name": "IngestionPipeline.__init__",
+          "kind": "function",
+          "line": 267,
+          "end_line": 282,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "run",
+          "qualified_name": "IngestionPipeline.run",
+          "kind": "function",
+          "line": 284,
+          "end_line": 288,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "run_for_current_agent",
+          "qualified_name": "IngestionPipeline.run_for_current_agent",
+          "kind": "function",
+          "line": 290,
+          "end_line": 339,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+          "name": "_run",
+          "qualified_name": "IngestionPipeline._run",
+          "kind": "function",
+          "line": 341,
+          "end_line": 593,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "language": "python",
+      "size_bytes": 3251,
+      "sha256": "5bcc3d81b5c044f80a65931b97806e3cb9fc9ed73cc4ccf0c6c4aa6414f656b4",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+          "name": "FactionRetriever",
+          "qualified_name": "FactionRetriever",
+          "kind": "class",
+          "line": 1,
+          "end_line": 66,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+          "name": "__init__",
+          "qualified_name": "FactionRetriever.__init__",
+          "kind": "function",
+          "line": 3,
+          "end_line": 13,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+          "name": "_embed",
+          "qualified_name": "FactionRetriever._embed",
+          "kind": "function",
+          "line": 15,
+          "end_line": 23,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+          "name": "search",
+          "qualified_name": "FactionRetriever.search",
+          "kind": "function",
+          "line": 25,
+          "end_line": 66,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/search_cli.py",
+      "language": "python",
+      "size_bytes": 1139,
+      "sha256": "ddce0335277681bbeaaa26bb6b8a158b1081a808fbd79a9a79f334763173493c",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/search_cli.py",
+          "name": "main",
+          "qualified_name": "main",
+          "kind": "function",
+          "line": 4,
+          "end_line": 19,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+      "language": "python",
+      "size_bytes": 1193,
+      "sha256": "4a59d2f3cc31612d161fef02b900835215a5ed15d9d0ae9dcdd1d07d49449559",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+          "name": "BasicSummarizer",
+          "qualified_name": "BasicSummarizer",
+          "kind": "class",
+          "line": 3,
+          "end_line": 7,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+          "name": "summarize",
+          "qualified_name": "BasicSummarizer.summarize",
+          "kind": "function",
+          "line": 4,
+          "end_line": 7,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+          "name": "OllamaSummarizer",
+          "qualified_name": "OllamaSummarizer",
+          "kind": "class",
+          "line": 9,
+          "end_line": 22,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+          "name": "__init__",
+          "qualified_name": "OllamaSummarizer.__init__",
+          "kind": "function",
+          "line": 10,
+          "end_line": 12,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+          "name": "summarize",
+          "qualified_name": "OllamaSummarizer.summarize",
+          "kind": "function",
+          "line": 13,
+          "end_line": 22,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "language": "python",
+      "size_bytes": 5623,
+      "sha256": "3a7a768ec564a9288fc12690ed5c94d418f13befb0bb89d5464d19bf6c7fb6ce",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "StaticAgentProvider",
+          "qualified_name": "StaticAgentProvider",
+          "kind": "class",
+          "line": 7,
+          "end_line": 12,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "__init__",
+          "qualified_name": "StaticAgentProvider.__init__",
+          "kind": "function",
+          "line": 8,
+          "end_line": 9,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "resolve_current_agent_id",
+          "qualified_name": "StaticAgentProvider.resolve_current_agent_id",
+          "kind": "function",
+          "line": 11,
+          "end_line": 12,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "StaticAgentRegistry",
+          "qualified_name": "StaticAgentRegistry",
+          "kind": "class",
+          "line": 15,
+          "end_line": 20,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "__init__",
+          "qualified_name": "StaticAgentRegistry.__init__",
+          "kind": "function",
+          "line": 16,
+          "end_line": 17,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "get_agent",
+          "qualified_name": "StaticAgentRegistry.get_agent",
+          "kind": "function",
+          "line": 19,
+          "end_line": 20,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "CaptureIndexer",
+          "qualified_name": "CaptureIndexer",
+          "kind": "class",
+          "line": 23,
+          "end_line": 32,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "__init__",
+          "qualified_name": "CaptureIndexer.__init__",
+          "kind": "function",
+          "line": 24,
+          "end_line": 25,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "upsert",
+          "qualified_name": "CaptureIndexer.upsert",
+          "kind": "function",
+          "line": 27,
+          "end_line": 29,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "reconcile_source",
+          "qualified_name": "CaptureIndexer.reconcile_source",
+          "kind": "function",
+          "line": 31,
+          "end_line": 32,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_agent_ingestion_records_provenance_on_content_and_stubs",
+          "qualified_name": "test_agent_ingestion_records_provenance_on_content_and_stubs",
+          "kind": "function",
+          "line": 35,
+          "end_line": 59,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_agent_ingestion_rejects_missing_provider",
+          "qualified_name": "test_agent_ingestion_rejects_missing_provider",
+          "kind": "function",
+          "line": 62,
+          "end_line": 65,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_agent_ingestion_rejects_missing_registry",
+          "qualified_name": "test_agent_ingestion_rejects_missing_registry",
+          "kind": "function",
+          "line": 68,
+          "end_line": 71,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_agent_ingestion_rejects_missing_authenticated_identity",
+          "qualified_name": "test_agent_ingestion_rejects_missing_authenticated_identity",
+          "kind": "function",
+          "line": 74,
+          "end_line": 80,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_agent_ingestion_rejects_unknown_agent",
+          "qualified_name": "test_agent_ingestion_rejects_unknown_agent",
+          "kind": "function",
+          "line": 83,
+          "end_line": 89,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_agent_ingestion_rejects_registry_identity_mismatch",
+          "qualified_name": "test_agent_ingestion_rejects_registry_identity_mismatch",
+          "kind": "function",
+          "line": 92,
+          "end_line": 103,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_agent_registry_controls_faction_assignment",
+          "qualified_name": "test_agent_registry_controls_faction_assignment",
+          "kind": "function",
+          "line": 106,
+          "end_line": 125,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_manual_ingestion_keeps_agent_provenance_empty",
+          "qualified_name": "test_manual_ingestion_keeps_agent_provenance_empty",
+          "kind": "function",
+          "line": 128,
+          "end_line": 136,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+          "name": "test_extractor_metadata_cannot_override_agent_provenance",
+          "qualified_name": "test_extractor_metadata_cannot_override_agent_provenance",
+          "kind": "function",
+          "line": 139,
+          "end_line": 155,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/tests/test_factions.py",
+      "language": "python",
+      "size_bytes": 340,
+      "sha256": "a54a0617039eb8a0c08fb71cd7163d09d576a9c3b25ca64636b6bc63ce3a3986",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_factions.py",
+          "name": "test_knife_faction_has_correct_domain",
+          "qualified_name": "test_knife_faction_has_correct_domain",
+          "kind": "function",
+          "line": 4,
+          "end_line": 9,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    },
+    {
+      "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "language": "python",
+      "size_bytes": 10325,
+      "sha256": "3e96ab65564d94a087c66c03a41e1e16a43437f4ecf7d9c0046cc2a6437021f7",
+      "status": "analyzed",
+      "symbols": [
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_faction_and_source_namespaces_are_attached",
+          "qualified_name": "test_faction_and_source_namespaces_are_attached",
+          "kind": "function",
+          "line": 5,
+          "end_line": 20,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "CaptureIndexer",
+          "qualified_name": "test_faction_and_source_namespaces_are_attached.CaptureIndexer",
+          "kind": "class",
+          "line": 7,
+          "end_line": 10,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "__init__",
+          "qualified_name": "test_faction_and_source_namespaces_are_attached.CaptureIndexer.__init__",
+          "kind": "function",
+          "line": 8,
+          "end_line": 8,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "upsert",
+          "qualified_name": "test_faction_and_source_namespaces_are_attached.CaptureIndexer.upsert",
+          "kind": "function",
+          "line": 9,
+          "end_line": 9,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "reconcile_source",
+          "qualified_name": "test_faction_and_source_namespaces_are_attached.CaptureIndexer.reconcile_source",
+          "kind": "function",
+          "line": 10,
+          "end_line": 10,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_unknown_faction_rejected",
+          "qualified_name": "test_unknown_faction_rejected",
+          "kind": "function",
+          "line": 22,
+          "end_line": 24,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_secrets_excluded",
+          "qualified_name": "test_secrets_excluded",
+          "kind": "function",
+          "line": 26,
+          "end_line": 30,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_csv_profile_and_report",
+          "qualified_name": "test_csv_profile_and_report",
+          "kind": "function",
+          "line": 32,
+          "end_line": 37,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_failed_file_prevents_reconciliation",
+          "qualified_name": "test_failed_file_prevents_reconciliation",
+          "kind": "function",
+          "line": 39,
+          "end_line": 48,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "TrackIndexer",
+          "qualified_name": "test_failed_file_prevents_reconciliation.TrackIndexer",
+          "kind": "class",
+          "line": 41,
+          "end_line": 44,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "__init__",
+          "qualified_name": "test_failed_file_prevents_reconciliation.TrackIndexer.__init__",
+          "kind": "function",
+          "line": 42,
+          "end_line": 42,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "upsert",
+          "qualified_name": "test_failed_file_prevents_reconciliation.TrackIndexer.upsert",
+          "kind": "function",
+          "line": 43,
+          "end_line": 43,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "reconcile_source",
+          "qualified_name": "test_failed_file_prevents_reconciliation.TrackIndexer.reconcile_source",
+          "kind": "function",
+          "line": 44,
+          "end_line": 44,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_chunk_ids_stay_stable_when_content_changes",
+          "qualified_name": "test_chunk_ids_stay_stable_when_content_changes",
+          "kind": "function",
+          "line": 50,
+          "end_line": 88,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "CaptureIndexer",
+          "qualified_name": "test_chunk_ids_stay_stable_when_content_changes.CaptureIndexer",
+          "kind": "class",
+          "line": 51,
+          "end_line": 62,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "__init__",
+          "qualified_name": "test_chunk_ids_stay_stable_when_content_changes.CaptureIndexer.__init__",
+          "kind": "function",
+          "line": 52,
+          "end_line": 54,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "upsert",
+          "qualified_name": "test_chunk_ids_stay_stable_when_content_changes.CaptureIndexer.upsert",
+          "kind": "function",
+          "line": 56,
+          "end_line": 58,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "reconcile_source",
+          "qualified_name": "test_chunk_ids_stay_stable_when_content_changes.CaptureIndexer.reconcile_source",
+          "kind": "function",
+          "line": 60,
+          "end_line": 62,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_unsupported_file_creates_stub_and_allows_reconciliation",
+          "qualified_name": "test_unsupported_file_creates_stub_and_allows_reconciliation",
+          "kind": "function",
+          "line": 91,
+          "end_line": 117,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "TrackIndexer",
+          "qualified_name": "test_unsupported_file_creates_stub_and_allows_reconciliation.TrackIndexer",
+          "kind": "class",
+          "line": 94,
+          "end_line": 105,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "__init__",
+          "qualified_name": "test_unsupported_file_creates_stub_and_allows_reconciliation.TrackIndexer.__init__",
+          "kind": "function",
+          "line": 95,
+          "end_line": 97,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "upsert",
+          "qualified_name": "test_unsupported_file_creates_stub_and_allows_reconciliation.TrackIndexer.upsert",
+          "kind": "function",
+          "line": 99,
+          "end_line": 101,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "reconcile_source",
+          "qualified_name": "test_unsupported_file_creates_stub_and_allows_reconciliation.TrackIndexer.reconcile_source",
+          "kind": "function",
+          "line": 103,
+          "end_line": 105,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_unsupported_file_creates_metadata_stub",
+          "qualified_name": "test_unsupported_file_creates_metadata_stub",
+          "kind": "function",
+          "line": 119,
+          "end_line": 153,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "CaptureIndexer",
+          "qualified_name": "test_unsupported_file_creates_metadata_stub.CaptureIndexer",
+          "kind": "class",
+          "line": 122,
+          "end_line": 133,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "__init__",
+          "qualified_name": "test_unsupported_file_creates_metadata_stub.CaptureIndexer.__init__",
+          "kind": "function",
+          "line": 123,
+          "end_line": 125,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "upsert",
+          "qualified_name": "test_unsupported_file_creates_metadata_stub.CaptureIndexer.upsert",
+          "kind": "function",
+          "line": 127,
+          "end_line": 129,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "reconcile_source",
+          "qualified_name": "test_unsupported_file_creates_metadata_stub.CaptureIndexer.reconcile_source",
+          "kind": "function",
+          "line": 131,
+          "end_line": 133,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_failed_extraction_creates_stub_without_reconciliation",
+          "qualified_name": "test_failed_extraction_creates_stub_without_reconciliation",
+          "kind": "function",
+          "line": 156,
+          "end_line": 186,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "CaptureIndexer",
+          "qualified_name": "test_failed_extraction_creates_stub_without_reconciliation.CaptureIndexer",
+          "kind": "class",
+          "line": 162,
+          "end_line": 173,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "__init__",
+          "qualified_name": "test_failed_extraction_creates_stub_without_reconciliation.CaptureIndexer.__init__",
+          "kind": "function",
+          "line": 163,
+          "end_line": 165,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "upsert",
+          "qualified_name": "test_failed_extraction_creates_stub_without_reconciliation.CaptureIndexer.upsert",
+          "kind": "function",
+          "line": 167,
+          "end_line": 169,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "reconcile_source",
+          "qualified_name": "test_failed_extraction_creates_stub_without_reconciliation.CaptureIndexer.reconcile_source",
+          "kind": "function",
+          "line": 171,
+          "end_line": 173,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_stub_identity_is_stable",
+          "qualified_name": "test_stub_identity_is_stable",
+          "kind": "function",
+          "line": 189,
+          "end_line": 211,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_extract_utf16le_text_with_bom",
+          "qualified_name": "test_extract_utf16le_text_with_bom",
+          "kind": "function",
+          "line": 213,
+          "end_line": 226,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_extract_utf8_text_with_bom",
+          "qualified_name": "test_extract_utf8_text_with_bom",
+          "kind": "function",
+          "line": 229,
+          "end_line": 237,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_extract_utf16_json_with_bom",
+          "qualified_name": "test_extract_utf16_json_with_bom",
+          "kind": "function",
+          "line": 240,
+          "end_line": 250,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_malformed_json_still_fails",
+          "qualified_name": "test_malformed_json_still_fails",
+          "kind": "function",
+          "line": 253,
+          "end_line": 260,
+          "decorators": [],
+          "bases": []
+        },
+        {
+          "path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+          "name": "test_legacy_snapshot_and_backup_files_are_excluded",
+          "qualified_name": "test_legacy_snapshot_and_backup_files_are_excluded",
+          "kind": "function",
+          "line": 263,
+          "end_line": 300,
+          "decorators": [],
+          "bases": []
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/__init__.py",
+      "line": 3,
+      "imported_module": "scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 2,
+      "imported_module": "",
+      "imported_names": [
+        "argparse"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 3,
+      "imported_module": "",
+      "imported_names": [
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 4,
+      "imported_module": "",
+      "imported_names": [
+        "sys"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 5,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 7,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 8,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 9,
+      "imported_module": "codebase_interpreter_agent.codebase_map",
+      "imported_names": [
+        "build_codebase_map"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/cli.py",
+      "line": 10,
+      "imported_module": "codebase_interpreter_agent.codebase_queries",
+      "imported_names": [
+        "answer_codebase_question"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+      "line": 2,
+      "imported_module": "__future__",
+      "imported_names": [
+        "annotations"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+      "line": 4,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "asdict",
+        "dataclass",
+        "field"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+      "line": 6,
+      "imported_module": "dependency_resolver",
+      "imported_names": [
+        "DependencyReport"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py",
+      "line": 7,
+      "imported_module": "scanner",
+      "imported_names": [
+        "ScanReport"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py",
+      "line": 2,
+      "imported_module": "__future__",
+      "imported_names": [
+        "annotations"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 2,
+      "imported_module": "__future__",
+      "imported_names": [
+        "annotations"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 4,
+      "imported_module": "",
+      "imported_names": [
+        "sys"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 5,
+      "imported_module": "collections",
+      "imported_names": [
+        "defaultdict"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 6,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "asdict",
+        "dataclass",
+        "field"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 7,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "PurePosixPath"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py",
+      "line": 9,
+      "imported_module": "scanner",
+      "imported_names": [
+        "ScanReport"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 1,
+      "imported_module": "__future__",
+      "imported_names": [
+        "annotations"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 3,
+      "imported_module": "",
+      "imported_names": [
+        "ast"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 4,
+      "imported_module": "",
+      "imported_names": [
+        "hashlib"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 5,
+      "imported_module": "",
+      "imported_names": [
+        "os"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 6,
+      "imported_module": "",
+      "imported_names": [
+        "time"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 7,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "asdict",
+        "dataclass",
+        "field"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py",
+      "line": 8,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_map.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_map.py",
+      "line": 4,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_map.py",
+      "line": 5,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_map.py",
+      "line": 6,
+      "imported_module": "codebase_interpreter_agent.codebase_map",
+      "imported_names": [
+        "build_codebase_map"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_map.py",
+      "line": 79,
+      "imported_module": "",
+      "imported_names": [
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 4,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 5,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 6,
+      "imported_module": "codebase_interpreter_agent.codebase_map",
+      "imported_names": [
+        "build_codebase_map"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_queries.py",
+      "line": 7,
+      "imported_module": "codebase_interpreter_agent.codebase_queries",
+      "imported_names": [
+        "find_dependents",
+        "find_symbol"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 4,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 5,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 6,
+      "imported_module": "codebase_interpreter_agent.codebase_map",
+      "imported_names": [
+        "build_codebase_map"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_map.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_codebase_question.py",
+      "line": 7,
+      "imported_module": "codebase_interpreter_agent.codebase_queries",
+      "imported_names": [
+        "answer_codebase_question"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/codebase_queries.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+      "line": 4,
+      "imported_module": "codebase_interpreter_agent.dependency_resolver",
+      "imported_names": [
+        "resolve_imports"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/dependency_resolver.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_dependency_resolver.py",
+      "line": 5,
+      "imported_module": "codebase_interpreter_agent.scanner",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+      "line": 1,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+      "line": 3,
+      "imported_module": "codebase_interpreter_agent",
+      "imported_names": [
+        "scan_project"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/__init__.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "agents/forge/codebase_interpreter_agent/tests/test_scanner.py",
+      "line": 63,
+      "imported_module": "",
+      "imported_names": [
+        "pytest"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/__init__.py",
+      "line": 1,
+      "imported_module": "pipeline",
+      "imported_names": [
+        "IngestionPipeline"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/__init__.py",
+      "line": 2,
+      "imported_module": "factions",
+      "imported_names": [
+        "FactionRegistry",
+        "Faction"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/__init__.py",
+      "line": 3,
+      "imported_module": "retrieval",
+      "imported_names": [
+        "FactionRetriever"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+      "line": 8,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "dataclass"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py",
+      "line": 9,
+      "imported_module": "typing",
+      "imported_names": [
+        "Protocol"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/artifact_stubs.py",
+      "line": 1,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "argparse",
+        "os"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "line": 2,
+      "imported_module": "factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "line": 3,
+      "imported_module": "pipeline",
+      "imported_names": [
+        "IngestionPipeline"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/cli.py",
+      "line": 4,
+      "imported_module": "indexing",
+      "imported_names": [
+        "NoopIndexer",
+        "OllamaQdrantIndexer"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "csv",
+        "json",
+        "mimetypes"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py",
+      "line": 2,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py",
+      "line": 1,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "dataclass"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+      "line": 10,
+      "imported_module": "qdrant_client",
+      "imported_names": [
+        "QdrantClient",
+        "models"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+      "line": 11,
+      "imported_module": "",
+      "imported_names": [
+        "urllib.request",
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py",
+      "line": 53,
+      "imported_module": "qdrant_client.http",
+      "imported_names": [
+        "models"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+      "line": 1,
+      "imported_module": "dataclasses",
+      "imported_names": [
+        "dataclass",
+        "field",
+        "asdict"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py",
+      "line": 2,
+      "imported_module": "typing",
+      "imported_names": [
+        "Any"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "hashlib"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 2,
+      "imported_module": "",
+      "imported_names": [
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 3,
+      "imported_module": "",
+      "imported_names": [
+        "os"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 4,
+      "imported_module": "pathlib",
+      "imported_names": [
+        "Path"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 6,
+      "imported_module": "factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 7,
+      "imported_module": "models",
+      "imported_names": [
+        "Chunk",
+        "IngestionReport"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 8,
+      "imported_module": "agent_context",
+      "imported_names": [
+        "AgentIdentity"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 9,
+      "imported_module": "extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 10,
+      "imported_module": "indexing",
+      "imported_names": [
+        "NoopIndexer"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/indexing.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py",
+      "line": 11,
+      "imported_module": "artifact_stubs",
+      "imported_names": [
+        "make_artifact_stub"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/artifact_stubs.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "line": 5,
+      "imported_module": "factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "line": 6,
+      "imported_module": "qdrant_client",
+      "imported_names": [
+        "QdrantClient"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "line": 7,
+      "imported_module": "",
+      "imported_names": [
+        "urllib.request",
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py",
+      "line": 43,
+      "imported_module": "qdrant_client.http",
+      "imported_names": [
+        "models"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/search_cli.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "argparse",
+        "os",
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/search_cli.py",
+      "line": 2,
+      "imported_module": "retrieval",
+      "imported_names": [
+        "FactionRetriever"
+      ],
+      "relative_level": 1,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/retrieval.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "os"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/src/knowledge_ingestion_service/summarization.py",
+      "line": 14,
+      "imported_module": "",
+      "imported_names": [
+        "requests"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "pytest"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "line": 3,
+      "imported_module": "src.knowledge_ingestion_service.agent_context",
+      "imported_names": [
+        "AgentIdentity"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/agent_context.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "line": 4,
+      "imported_module": "src.knowledge_ingestion_service.pipeline",
+      "imported_names": [
+        "IngestionPipeline"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_agent_ingestion.py",
+      "line": 140,
+      "imported_module": "src.knowledge_ingestion_service.models",
+      "imported_names": [
+        "Chunk"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/models.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_factions.py",
+      "line": 1,
+      "imported_module": "src.knowledge_ingestion_service.factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 1,
+      "imported_module": "",
+      "imported_names": [
+        "json"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "standard_library",
+      "note": "Top-level import name belongs to this Python runtime's standard library."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 2,
+      "imported_module": "",
+      "imported_names": [
+        "pytest"
+      ],
+      "relative_level": 0,
+      "status": "external",
+      "target_paths": [],
+      "classification": "likely_third_party",
+      "note": "No local target matched. Could be a third-party dependency or an unavailable local module."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 3,
+      "imported_module": "src.knowledge_ingestion_service.pipeline",
+      "imported_names": [
+        "IngestionPipeline"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 190,
+      "imported_module": "src.knowledge_ingestion_service.pipeline",
+      "imported_names": [
+        "_make_stub_chunks"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 191,
+      "imported_module": "src.knowledge_ingestion_service.factions",
+      "imported_names": [
+        "FactionRegistry"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/factions.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 214,
+      "imported_module": "src.knowledge_ingestion_service.extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 230,
+      "imported_module": "src.knowledge_ingestion_service.extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 241,
+      "imported_module": "src.knowledge_ingestion_service.extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 254,
+      "imported_module": "src.knowledge_ingestion_service.extractors",
+      "imported_names": [
+        "extract"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    },
+    {
+      "source_path": "services/knowledge_ingestion_service/tests/test_pipeline.py",
+      "line": 264,
+      "imported_module": "src.knowledge_ingestion_service.pipeline",
+      "imported_names": [
+        "_discover"
+      ],
+      "relative_level": 0,
+      "status": "resolved_local",
+      "target_paths": [
+        "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py"
+      ],
+      "classification": "local",
+      "note": "Matched against inventoried Python module paths."
+    }
+  ],
+  "errors": [],
+  "skipped": [
+    ".env: secret-like filename",
+    "codebase_map.json: generated artifact or backup",
+    "dependency_report.json: generated artifact or backup",
+    "interpreter_review.txt: generated artifact or backup",
+    "patch_scanner.py: generated artifact or backup",
+    "scan_debug.log: generated artifact or backup",
+    "scan_report.json: generated artifact or backup",
+    "agents/forge/codebase_interpreter_agent/scan_debug.log: generated artifact or backup",
+    "agents/forge/codebase_interpreter_agent/scan_report.json: generated artifact or backup",
+    "agents/forge/codebase_interpreter_agent/src/codebase_interpreter_agent/scanner.py.bak: generated artifact or backup",
+    "services/knowledge_ingestion_service/src/knowledge_ingestion_service/extractors.py.bak-encoding: generated artifact or backup",
+    "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py.bak-corpus-hygiene: generated artifact or backup",
+    "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py.bak-egg-info: generated artifact or backup",
+    "services/knowledge_ingestion_service/src/knowledge_ingestion_service/pipeline.py.bak-manifest-exclusions: generated artifact or backup",
+    "services/knowledge_ingestion_service/tests/test_pipeline.py.bak-corpus-hygiene: generated artifact or backup",
+    "services/knowledge_ingestion_service/tests/test_pipeline.py.bak-egg-info: generated artifact or backup"
+  ],
+  "summary": {
+    "file_count": 39,
+    "symbol_count": 167,
+    "import_edge_count": 99,
+    "local_edge_count": 48,
+    "external_edge_count": 51,
+    "unresolved_edge_count": 0,
+    "parse_error_count": 0
+  }
+}

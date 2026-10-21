@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: alisa-codebase-interpreter-agent
+Version: 0.1.0
+Summary: Deterministic codebase inventory and Python symbol analysis for ALISA
+Requires-Python: >=3.10
+Provides-Extra: test
+Requires-Dist: pytest>=8; extra == "test"
