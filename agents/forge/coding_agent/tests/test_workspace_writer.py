@@ -1,13 +1,13 @@
 import pytest
 
-from src.coding_agent.change_tracking import (
+from coding_agent.change_tracking import (
     ChangeState,
     WorkspaceChange,
     content_hash,
 )
-from src.coding_agent.models import ChangeType, FileChange
-from src.coding_agent.workspace import Workspace
-from src.coding_agent.workspace_writer import (
+from coding_agent.models import ChangeType, FileChange
+from coding_agent.workspace import Workspace
+from coding_agent.workspace_writer import (
     RecoveryRecord,
     WorkspaceWriteError,
     WorkspaceWriter,

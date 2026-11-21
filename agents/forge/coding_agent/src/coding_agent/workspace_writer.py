@@ -92,34 +92,13 @@ class WorkspaceWriter:
         except WorkspaceError as exc:
             raise WorkspaceWriteError(str(exc)) from exc
 
+    
     def _resolve_create_target(self, relative_path: str) -> Path:
-        # Resolve the parent, not a nonexistent target. This prevents a
-        # symlinked parent from redirecting creation outside the workspace.
-        relative = Path(relative_path)
-        if relative.is_absolute() or ".." in relative.parts:
-            raise WorkspaceWriteError("Unsafe workspace-relative path")
-
-        parent_rel = relative.parent
-        if str(parent_rel) in ("", "."):
-            parent = self.workspace.root
-        else:
-            parent = self._resolve_existing(parent_rel.as_posix())
-
-        if not parent.is_dir():
-            raise WorkspaceWriteError("Parent path is not a directory")
-
-        target = parent / relative.name
         try:
-            target.resolve(strict=False).relative_to(self.workspace.root)
-        except (ValueError, OSError, RuntimeError) as exc:
-            raise WorkspaceWriteError(
-                "Creation target escapes the workspace"
-            ) from exc
+            return self.workspace.resolve_create_path(relative_path)
+        except WorkspaceError as exc:
+            raise WorkspaceWriteError(str(exc)) from exc
 
-        if target.exists() or target.is_symlink():
-            raise WorkspaceWriteError("Creation target already exists")
-
-        return target
 
     @staticmethod
     def _atomic_replace(target: Path, data: bytes) -> None:

@@ -1,6 +1,6 @@
 ﻿import pytest
 
-from src.coding_agent.models import (
+from coding_agent.models import (
     ChangeType,
     CodingTask,
     CommandResult,

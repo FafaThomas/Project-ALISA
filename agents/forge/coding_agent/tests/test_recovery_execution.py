@@ -1,14 +1,14 @@
 
-from src.coding_agent.change_journal import ChangeJournal,JournalError
-from src.coding_agent.change_tracking import content_hash
-from src.coding_agent.recovery import (
+from coding_agent.change_journal import ChangeJournal,JournalError
+from coding_agent.change_tracking import content_hash
+from coding_agent.recovery import (
     RecoveryAction,
     RecoveryCandidate,
     RecoveryDecision,
     RecoveryStatus,
     execute_recovery,
 )
-from src.coding_agent.workspace import Workspace
+from coding_agent.workspace import Workspace
 
 
 

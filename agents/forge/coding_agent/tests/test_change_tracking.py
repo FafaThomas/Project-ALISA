@@ -1,6 +1,6 @@
 import pytest
 
-from src.coding_agent.change_tracking import (
+from coding_agent.change_tracking import (
     ChangeState,
     WorkspaceChange,
     content_hash,

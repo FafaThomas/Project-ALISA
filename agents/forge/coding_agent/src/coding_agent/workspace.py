@@ -67,7 +67,7 @@ class Workspace:
         # final resolved path back inside the workspace.
         normalized_parts = raw.replace("\\", "/").split("/")
         if any(part == ".." for part in normalized_parts):
-            raise WorkspacePathError("Parent-directory traversal is not allowed")
+            raise WorkspacePathError("Parent traversal is not allowed")
 
         candidate = self.root / supplied
 
@@ -86,6 +86,38 @@ class Workspace:
             ) from exc
 
         return resolved
+
+    def resolve_create_path(self, relative_path: str | Path) -> Path:
+        raw = str(relative_path).strip()
+
+        if not raw:
+            raise WorkspacePathError("Empty paths are not allowed")
+
+        supplied = Path(raw)
+
+        if supplied.is_absolute() or supplied.drive:
+            raise WorkspacePathError("Absolute paths are not allowed")
+
+        if ".." in supplied.parts:
+            raise WorkspacePathError("Parent traversal is not allowed")
+
+        candidate = self.root / supplied
+
+        # The parent must already exist and be resolvable.
+        try:
+            parent = candidate.parent.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise WorkspacePathError("Parent directory does not exist") from exc
+
+        # Ensure the resolved parent remains inside the workspace.
+        if not parent.is_relative_to(self.root):
+            raise WorkspacePathError("Path escapes workspace")
+
+        # Reject existing targets and dangling symlinks.
+        if candidate.exists() or candidate.is_symlink():
+            raise WorkspacePathError("Target already exists")
+
+        return parent / candidate.name
 
     def read_text(
         self,

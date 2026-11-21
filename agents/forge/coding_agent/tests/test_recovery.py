@@ -1,7 +1,7 @@
-from src.coding_agent.change_journal import ChangeJournal
-from src.coding_agent.change_tracking import content_hash
-from src.coding_agent.recovery import RecoveryStatus, assess_recovery
-from src.coding_agent.workspace import Workspace
+from coding_agent.change_journal import ChangeJournal
+from coding_agent.change_tracking import content_hash
+from coding_agent.recovery import RecoveryStatus, assess_recovery
+from coding_agent.workspace import Workspace
 
 
 def test_assessment_finds_interrupted_apply(tmp_path):

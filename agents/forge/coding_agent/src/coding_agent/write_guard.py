@@ -68,18 +68,33 @@ def validate_approved_change(
             )
         target = workspace.root / proposal.path
 
+    
     if proposal.change_type == ChangeType.CREATE:
-        if target.exists():
-            raise StaleFileError("Cannot create file: target already exists")
+        try:
+            target = workspace.resolve_create_path(proposal.path)
+        except WorkspaceError as exc:
+            raise StaleFileError(
+                f"Cannot create target: {exc}"
+            ) from exc
+
         actual_hash = None
     else:
+        try:
+            target = workspace.resolve_path(proposal.path)
+        except WorkspaceError as exc:
+            raise StaleFileError(
+                "Expected existing file is missing or cannot be resolved"
+            ) from exc
+
         try:
             actual_bytes = target.read_bytes()
         except OSError as exc:
             raise StaleFileError(
                 f"Could not inspect current file state: {exc}"
             ) from exc
+
         actual_hash = content_hash(actual_bytes)
+
 
     if actual_hash != change.original_hash:
         raise StaleFileError(
