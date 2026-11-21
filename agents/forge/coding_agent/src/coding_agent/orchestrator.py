@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
+from coding_agent.context_engine import ContextEngine
 from coding_agent.change_tracking import (
     ChangeState,
     WorkspaceChange,
@@ -43,6 +44,7 @@ class TaskOrchestrator:
         coordinator: ChangeCoordinator,
         command_runner: CommandRunner,
         verification_engine: VerificationEngine,
+        context_engine: ContextEngine | None = None,
     ) -> None:
         self.planner = planner
         self.coordinator = coordinator
@@ -55,6 +57,16 @@ class TaskOrchestrator:
         if coordinator_root != runner_root:
             raise ValueError(
                 "ChangeCoordinator and CommandRunner must use "
+                "the same workspace"
+            )
+
+        self.context_engine = context_engine or ContextEngine(
+            coordinator.workspace
+        )
+
+        if self.context_engine.workspace.root != coordinator_root:
+            raise ValueError(
+                "ContextEngine and ChangeCoordinator must use "
                 "the same workspace"
             )
 
@@ -182,21 +194,33 @@ class TaskOrchestrator:
 
         try:
             self._validate_task_workspace(task)
-        except (OSError, OrchestrationError, ValueError) as exc:
+        except (OSError, RuntimeError, OrchestrationError, ValueError) as exc:
             return ExecutionResult(
                 task_id=task.task_id,
                 status=TaskStatus.BLOCKED,
                 errors=(str(exc),),
             )
 
-        # 1. Generate the implementation plan.
+        # 1. Build repository context and generate the implementation plan.
         try:
-            plan = self.planner.plan(task)
+            context_package = self.context_engine.build(task)
+
+            notes.append(
+                f"Planner context assembled from "
+                f"{len(context_package.files)} file(s)."
+            )
+
+            plan = self.planner.plan(
+                task,
+                context=context_package.render(),
+            )
+
         except Exception as exc:
             return ExecutionResult(
                 task_id=task.task_id,
                 status=TaskStatus.FAILED,
-                errors=(f"Planning failed: {exc}",),
+                errors=(f"Context preparation or planning failed: {exc}",),
+                notes=tuple(notes),
             )
 
         if not isinstance(plan, ImplementationPlan):

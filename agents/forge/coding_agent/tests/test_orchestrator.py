@@ -23,9 +23,11 @@ class FakePlanner:
         self.plan_result = plan
         self.error = error
         self.calls = []
+        self.contexts = []
 
     def plan(self, task, context=""):
         self.calls.append(task)
+        self.contexts.append(context)
 
         if self.error:
             raise self.error
@@ -463,3 +465,42 @@ def test_task_cannot_target_a_different_workspace(tmp_path):
     assert result.status == TaskStatus.BLOCKED
     assert runner.calls == []
     assert not (unauthorized / "new.py").exists()
+
+
+def test_orchestrator_passes_workspace_context_to_planner(tmp_path):
+    task = make_task(tmp_path)
+
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# Existing Project\nAuthentication service.",
+        encoding="utf-8",
+    )
+
+    plan = make_plan(
+        task,
+        changes=[
+            FileChange(
+                path="example.py",
+                change_type=ChangeType.CREATE,
+                reason="Create a test module",
+                content="VALUE = 42\n",
+            )
+        ],
+    )
+
+    orchestrator, _, planner, _ = make_orchestrator(
+        tmp_path,
+        plan,
+    )
+
+    result = orchestrator.run(
+        task,
+        approval_handler=lambda proposed: False,
+    )
+
+    assert result.status == TaskStatus.BLOCKED
+    assert len(planner.contexts) == 1
+    assert "PROJECT CONTEXT" in planner.contexts[0]
+    assert "README.md" in planner.contexts[0]
+    assert "Authentication service" in planner.contexts[0]
+
