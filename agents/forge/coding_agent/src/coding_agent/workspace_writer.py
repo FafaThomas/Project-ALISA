@@ -33,6 +33,7 @@ class RecoveryRecord:
     operation: str
     original_bytes: bytes | None
     resulting_hash: str | None
+    created_directories: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -124,35 +125,63 @@ class WorkspaceWriter:
 
     def _create(self, change, proposal, authorization) -> WriteResult:
         target = self._resolve_create_target(proposal.path)
-
         data = proposal.content.encode("utf-8")
         if content_hash(data) != authorization.intended_result_hash:
             raise WorkspaceWriteError("Proposed content changed after validation")
 
-        # Exclusive creation prevents overwriting a target that appears after
-        # the preflight check. This path intentionally does not use replace.
+        # Create only missing parents after approval, recording exactly which
+        # directories this operation owns so rollback never removes old dirs.
+        missing: list[Path] = []
+        parent = target.parent
+        while not parent.exists():
+            missing.append(parent)
+            parent = parent.parent
+        created: list[Path] = []
         try:
+            for directory in reversed(missing):
+                directory.mkdir()
+                created.append(directory)
             with target.open("xb") as handle:
                 handle.write(data)
                 handle.flush()
                 os.fsync(handle.fileno())
-        except FileExistsError as exc:
-            raise WorkspaceWriteError(
-                "Creation target appeared before file creation"
-            ) from exc
+            result_hash = content_hash(target.read_bytes())
+            if result_hash != authorization.intended_result_hash:
+                raise WorkspaceWriteError(
+                    "Created file did not match the intended content hash"
+                )
+        except Exception as exc:
+            # If the write fails midway, remove only this operation's file and
+            # empty directories. Never recursively delete user content.
+            try:
+                if target.exists() and target.is_file():
+                    target.unlink()
+                for directory in reversed(created):
+                    try:
+                        directory.rmdir()
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+            if isinstance(exc, WorkspaceWriteError):
+                raise
+            if isinstance(exc, FileExistsError):
+                raise WorkspaceWriteError(
+                    "Creation target appeared before file creation"
+                ) from exc
+            raise WorkspaceWriteError(f"Could not create file: {exc}") from exc
 
-        result_hash = content_hash(target.read_bytes())
-        if result_hash != authorization.intended_result_hash:
-            raise WorkspaceWriteError(
-                "Created file did not match the intended content hash"
-            )
-
+        created_relative = tuple(
+            directory.relative_to(self.workspace.root).as_posix()
+            for directory in created
+        )
         recovery = RecoveryRecord(
             change_id=change.change_id,
             relative_path=proposal.path,
             operation="create",
             original_bytes=None,
             resulting_hash=result_hash,
+            created_directories=created_relative,
         )
         return WriteResult(
             change_id=change.change_id,
@@ -280,6 +309,17 @@ class WorkspaceWriter:
                 if recovery.operation == "create":
                     target.unlink()
                     restored_hash = None
+                    for relative_directory in reversed(recovery.created_directories):
+                        directory = self.workspace.root / relative_directory
+                        try:
+                            resolved_directory = directory.resolve(strict=True)
+                            resolved_directory.relative_to(self.workspace.root)
+                            if resolved_directory.is_dir():
+                                resolved_directory.rmdir()
+                        except (OSError, RuntimeError, ValueError):
+                            # Preserve directories that are no longer empty,
+                            # missing, or no longer safely inside the workspace.
+                            continue
 
                 else:
                     if recovery.original_bytes is None:

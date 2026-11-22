@@ -1,14 +1,16 @@
 
-"""Deterministic Python source index: symbols, imports, and dependencies."""
+"""Deterministic polyglot source index: symbols, imports, and dependencies."""
 
 from __future__ import annotations
 
-import ast
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from coding_agent.parsers import ParserRegistry, build_default_registry
+from coding_agent.parsers.base import ImportRecord, ParseDiagnostic, ParseFailure, ReferenceRecord, Symbol
 from coding_agent.workspace import Workspace, WorkspaceError
+from coding_agent.resolvers import Relationship, RelationshipEngine
 
 
 IGNORED_DIRECTORIES = {
@@ -19,29 +21,6 @@ IGNORED_DIRECTORIES = {
 }
 
 SOURCE_ROOT_MARKERS = {"src", "lib", "app"}
-
-
-@dataclass(frozen=True)
-class Symbol:
-    """A class, function, or method defined in a Python module."""
-
-    name: str
-    qualified_name: str
-    kind: str
-    relative_path: str
-    line: int
-    end_line: int
-    signature: str | None = None
-
-
-@dataclass(frozen=True)
-class ImportRecord:
-    """An import statement found in a Python module."""
-
-    module: str | None
-    imported_names: tuple[str, ...]
-    relative_level: int
-    line: int
 
 
 @dataclass(frozen=True)
@@ -57,24 +36,28 @@ class Dependency:
 
 @dataclass(frozen=True)
 class ModuleRecord:
-    """Structural information extracted from one Python file."""
+    """Structural information extracted from one source file."""
 
     relative_path: str
     module_names: tuple[str, ...]
     symbols: tuple[Symbol, ...]
     imports: tuple[ImportRecord, ...]
+    language: str
+    references: tuple[ReferenceRecord, ...] = ()
     parse_error: str | None = None
+    diagnostics: tuple[ParseDiagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
 class CodeIndex:
-    """Immutable index of the Python files in a workspace."""
+    """Immutable index of supported source files in a workspace."""
 
     modules: tuple[ModuleRecord, ...]
     dependencies: tuple[Dependency, ...]
     discovered_files: int
     indexed_files: int
     failed_files: int
+    relationships: tuple[Relationship, ...] = ()
 
     @property
     def symbols(self) -> tuple[Symbol, ...]:
@@ -134,14 +117,47 @@ class CodeIndex:
             if dependency.target_module in aliases
         )
 
+    def build_knowledge_graph(self):
+        """Build a queryable graph from this index without reparsing files."""
+        from coding_agent.knowledge_graph import KnowledgeGraph
+
+        return KnowledgeGraph.from_code_index(self)
+
+    @property
+    def unresolved_relationships(self) -> tuple[Relationship, ...]:
+        """Relationships that need more evidence or a language resolver."""
+        return tuple(
+            relationship
+            for relationship in self.relationships
+            if relationship.status in {"unresolved", "ambiguous"}
+        )
+
+    def relationships_from(self, relative_path: str) -> tuple[Relationship, ...]:
+        """Return relationships whose source is the requested file."""
+        normalized = relative_path.replace("\\", "/")
+        return tuple(
+            relationship
+            for relationship in self.relationships
+            if relationship.source_path == normalized
+        )
+
     def render(self) -> str:
         """Render a compact structural overview for an LLM."""
 
+        languages = sorted({module.language for module in self.modules})
+        if len(languages) == 1 and languages[0] == "python":
+            heading = "PYTHON CODE STRUCTURE"
+            discovered_label = "Discovered Python files"
+        else:
+            heading = "CODEBASE STRUCTURE"
+            discovered_label = "Discovered supported files"
+
         sections = [
-            "PYTHON CODE STRUCTURE",
-            f"Discovered Python files: {self.discovered_files}",
+            heading,
+            f"{discovered_label}: {self.discovered_files}",
             f"Indexed modules: {self.indexed_files}",
             f"Files with parse errors: {self.failed_files}",
+            f"Languages: {', '.join(languages) if languages else '(none)'}",
             "",
             "MODULES AND SYMBOLS:",
         ]
@@ -156,12 +172,38 @@ class CodeIndex:
 
             if module.parse_error:
                 sections.append(f"  PARSE ERROR: {module.parse_error}")
+                for diagnostic in module.diagnostics:
+                    sections.append(
+                        f"  {diagnostic.severity.upper()} {diagnostic.code or 'parse'} "
+                        f"at {diagnostic.line}:{diagnostic.column}: {diagnostic.message}"
+                    )
                 continue
 
             for symbol in module.symbols:
+                details = []
+                if symbol.signature:
+                    details.append(f"signature={symbol.signature}")
+                if symbol.return_type:
+                    details.append(f"returns={symbol.return_type}")
+                if symbol.modifiers:
+                    details.append(f"modifiers={', '.join(symbol.modifiers)}")
+                if symbol.decorators:
+                    details.append(f"decorators={', '.join(symbol.decorators)}")
+                if symbol.is_exported:
+                    details.append("exported")
+                if symbol.is_async:
+                    details.append("async")
+                if symbol.role:
+                    details.append(f"role={symbol.role}")
+                suffix = f" [{'; '.join(details)}]" if details else ""
                 sections.append(
                     f"  {symbol.kind}: {symbol.qualified_name} "
-                    f"(lines {symbol.line}-{symbol.end_line})"
+                    f"(lines {symbol.line}-{symbol.end_line}){suffix}"
+                )
+            for reference in module.references:
+                sections.append(
+                    f"  reference ({reference.kind}): {reference.target} "
+                    f"(line {reference.line})"
                 )
 
         sections.append("\nINTERNAL DEPENDENCIES:")
@@ -181,82 +223,54 @@ class CodeIndex:
                 f"(line {dependency.line}; imports: {imported})"
             )
 
+        if self.relationships:
+            sections.append("\nTYPED RELATIONSHIPS:")
+            for relationship in self.relationships:
+                source = relationship.source_symbol or relationship.source_module
+                target = relationship.target_symbol or relationship.target_module or "(unresolved)"
+                suffix = f" [{relationship.status}]"
+                if relationship.candidates:
+                    suffix += f" candidates={len(relationship.candidates)}"
+                sections.append(
+                    f"  {relationship.kind}: {source} -> {target} "
+                    f"({relationship.source_path}:{relationship.line}){suffix}"
+                )
+
         return "\n".join(sections)
 
 
-class _SymbolVisitor(ast.NodeVisitor):
-    """Extract definitions while retaining their qualified scope."""
-
-    def __init__(self, relative_path: str) -> None:
-        self.relative_path = relative_path
-        self.scope: list[str] = []
-        self.symbols: list[Symbol] = []
-        self.class_depth = 0
-
-    def _visit_definition(self, node, kind: str) -> None:
-        name = node.name
-        qualified = ".".join([*self.scope, name])
-
-        signature = None
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            signature = ast.unparse(node.args)
-
-        self.symbols.append(
-            Symbol(
-                name=name,
-                qualified_name=qualified,
-                kind=kind,
-                relative_path=self.relative_path,
-                line=node.lineno,
-                end_line=getattr(node, "end_lineno", node.lineno),
-                signature=signature,
-            )
-        )
-
-        self.scope.append(name)
-        for child in node.body:
-            self.visit(child)
-        self.scope.pop()
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self.class_depth += 1
-        self._visit_definition(node, "class")
-        self.class_depth -= 1
-
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        kind = "method" if self.class_depth else "function"
-        self._visit_definition(node, kind)
-
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        kind = "method" if self.class_depth else "function"
-        self._visit_definition(node, kind)
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        # Lambda expressions are not named declarations.
-        return
-
-    def extract(self, tree: ast.AST, source: str) -> tuple[Symbol, ...]:
-        self.source = source
-        self.visit(tree)
-        return tuple(self.symbols)
-
-
 class CodeIndexer:
-    """Build a Python symbol and internal dependency index."""
+    """Build a multi-language symbol and internal dependency index."""
 
     def __init__(
         self,
         workspace: Workspace,
         *,
         max_files: int = 2000,
+        parser_registry: ParserRegistry | None = None,
+        relationship_engine: RelationshipEngine | None = None,
+        parser_language_overrides: dict[str, str] | None = None,
     ) -> None:
         if max_files < 1:
             raise ValueError("max_files must be positive")
 
         self.workspace = workspace
         self.max_files = max_files
+        self.parser_language_overrides = {
+            key.lower() if key.startswith(".") else key.lower(): value.lower()
+            for key, value in (parser_language_overrides or {}).items()
+        }
+
+        self.parser_registry = (
+            parser_registry
+            if parser_registry is not None
+            else build_default_registry()
+        )
+        self.relationship_engine = (
+            relationship_engine
+            if relationship_engine is not None
+            else RelationshipEngine()
+        )
 
     @staticmethod
     def _module_aliases(relative_path: str) -> tuple[str, ...]:
@@ -281,67 +295,18 @@ class CodeIndexer:
         # Preserve order while removing duplicates.
         return tuple(dict.fromkeys(aliases))
 
-    @staticmethod
-    def _collect_imports(tree: ast.AST) -> tuple[ImportRecord, ...]:
-        imports = []
+    def _discover_source_files(self) -> list[str]:
+        """Discover files supported by the registered parsers."""
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    imports.append(
-                        ImportRecord(
-                            module=alias.name,
-                            imported_names=(alias.asname or alias.name,),
-                            relative_level=0,
-                            line=node.lineno,
-                        )
-                    )
-
-            elif isinstance(node, ast.ImportFrom):
-                imports.append(
-                    ImportRecord(
-                        module=node.module,
-                        imported_names=tuple(
-                            alias.name for alias in node.names
-                        ),
-                        relative_level=node.level,
-                        line=node.lineno,
-                    )
-                )
-
-        return tuple(sorted(imports, key=lambda item: item.line))
-
-    @staticmethod
-    def _resolve_relative_import(
-        source_module: str,
-        import_record: ImportRecord,
-        is_package: bool,
-    ) -> str | None:
-        if import_record.relative_level == 0:
-            return import_record.module
-
-        parts = source_module.split(".")
-
-        # A package's __init__.py imports are relative to the package itself.
-        if not is_package:
-            parts = parts[:-1]
-
-        remove_count = import_record.relative_level - 1
-
-        if remove_count > len(parts):
-            return None
-
-        if remove_count:
-            parts = parts[:len(parts) - remove_count]
-
-        if import_record.module:
-            parts.extend(import_record.module.split("."))
-
-        return ".".join(parts) if parts else None
-
-    def _discover_python_files(self) -> list[str]:
         root = self.workspace.root
-        discovered = []
+        discovered = set()
+
+        supported_extensions = set(
+            self.parser_registry.supported_extensions
+        )
+        supported_filenames = set(
+            self.parser_registry.supported_filenames
+        )
 
         for current, dirnames, filenames in os.walk(
             root,
@@ -360,46 +325,82 @@ class CodeIndexer:
             for filename in sorted(filenames):
                 path = current_path / filename
 
-                if filename.lower().endswith(".py") and not path.is_symlink():
-                    discovered.append(
-                        path.relative_to(root).as_posix()
-                    )
+                if path.is_symlink():
+                    continue
 
-                    if len(discovered) >= self.max_files:
-                        return discovered
+                if (
+                    path.suffix.lower() not in supported_extensions
+                    and filename.lower() not in supported_filenames
+                ):
+                    continue
 
-        return discovered
+                discovered.add(
+                    path.relative_to(root).as_posix()
+                )
+
+                if len(discovered) >= self.max_files:
+                    return sorted(discovered)
+
+        return sorted(discovered)
 
     def build(self) -> CodeIndex:
-        """Discover, parse, and connect Python modules."""
+        """Discover, parse, and connect source modules."""
 
-        paths = self._discover_python_files()
+        paths = self._discover_source_files()
         modules = []
 
         for relative_path in paths:
+            extension = Path(relative_path).suffix.lower()
+            language_override = self.parser_language_overrides.get(extension)
+            parser = self.parser_registry.get_parser(
+                relative_path, language=language_override
+            )
+
+            if parser is None:
+                continue
+
             aliases = self._module_aliases(relative_path)
 
             try:
                 snapshot = self.workspace.read_text(relative_path)
-                tree = ast.parse(
-                    snapshot.content,
-                    filename=relative_path,
-                )
 
-                visitor = _SymbolVisitor(relative_path)
-                symbols = visitor.extract(tree, snapshot.content)
-                imports = self._collect_imports(tree)
+                parsed = parser.parse(
+                    relative_path,
+                    snapshot.content,
+                )
 
                 modules.append(
                     ModuleRecord(
                         relative_path=relative_path,
                         module_names=aliases,
-                        symbols=symbols,
-                        imports=imports,
+                        symbols=parsed.symbols,
+                        imports=parsed.imports,
+                        language=parser.language,
+                        references=parsed.references,
                     )
                 )
 
-            except (SyntaxError, UnicodeError, WorkspaceError, OSError) as exc:
+            except (
+                SyntaxError,
+                UnicodeError,
+                WorkspaceError,
+                OSError,
+                RuntimeError,
+            ) as exc:
+                diagnostics = getattr(exc, "diagnostics", ())
+                if isinstance(exc, SyntaxError) and not diagnostics:
+                    line = getattr(exc, "lineno", None) or 1
+                    column = getattr(exc, "offset", None) or 1
+                    diagnostics = (
+                        ParseDiagnostic(
+                            message=getattr(exc, "msg", None) or str(exc),
+                            line=line,
+                            column=column,
+                            end_line=getattr(exc, "end_lineno", None),
+                            end_column=getattr(exc, "end_offset", None),
+                            code="python.syntax-error" if parser.language == "python" else "parser.syntax-error",
+                        ),
+                    )
                 modules.append(
                     ModuleRecord(
                         relative_path=relative_path,
@@ -407,72 +408,49 @@ class CodeIndexer:
                         symbols=(),
                         imports=(),
                         parse_error=str(exc),
+                        language=parser.language,
+                        references=(),
+                        diagnostics=tuple(diagnostics),
                     )
                 )
 
-        module_lookup = {
-            alias: module
-            for module in modules
-            for alias in module.module_names
-        }
-
-        dependencies = []
-
-        for module in modules:
-            if module.parse_error or not module.module_names:
-                continue
-
-            source_name = module.module_names[-1]
-            is_package = Path(module.relative_path).name == "__init__.py"
-
-            for imported in module.imports:
-                target_name = self._resolve_relative_import(
-                    source_name,
-                    imported,
-                    is_package,
-                )
-
-                if not target_name:
-                    continue
-
-                possible_targets = [
-                    f"{target_name}.{name}"
-                    for name in imported.imported_names
-                    if name != "*"
-                ]
-
-                possible_targets.append(target_name)
-
-                resolved = next(
-                    (
-                        candidate
-                        for candidate in possible_targets
-                        if candidate in module_lookup
-                    ),
-                    None,
-                )
-
-                if resolved is None:
-                    continue
-
-                dependencies.append(
-                    Dependency(
-                        source_module=source_name,
-                        target_module=resolved,
-                        relative_path=module.relative_path,
-                        line=imported.line,
-                        imported_names=imported.imported_names,
-                    )
-                )
+        contextual_resolver = getattr(
+            self.relationship_engine, "resolve_with_context", None
+        )
+        if contextual_resolver is not None:
+            relationships = contextual_resolver(
+                tuple(modules), workspace_root=self.workspace.root
+            )
+        else:
+            # Preserve compatibility with custom relationship engines that
+            # implement the original resolve(modules) interface.
+            relationships = self.relationship_engine.resolve(tuple(modules))
+        dependencies = tuple(
+            Dependency(
+                source_module=relationship.source_module,
+                target_module=relationship.target_module or "",
+                relative_path=relationship.source_path,
+                line=relationship.line,
+                imported_names=tuple(
+                    item for item in dict(relationship.metadata).get("imported_names", "").split(",")
+                    if item
+                ),
+            )
+            for relationship in relationships
+            if relationship.kind == "imports" and relationship.status == "resolved"
+        )
 
         return CodeIndex(
             modules=tuple(modules),
-            dependencies=tuple(dependencies),
+            dependencies=dependencies,
             discovered_files=len(paths),
             indexed_files=sum(
-                module.parse_error is None for module in modules
+                module.parse_error is None
+                for module in modules
             ),
             failed_files=sum(
-                module.parse_error is not None for module in modules
+                module.parse_error is not None
+                for module in modules
             ),
+            relationships=relationships,
         )

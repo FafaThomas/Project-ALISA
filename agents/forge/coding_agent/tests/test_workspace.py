@@ -120,3 +120,48 @@ def test_rejects_workspace_root_as_file(tmp_path):
 
     with pytest.raises(WorkspaceFileError, match="regular file"):
         workspace.read_text(".")
+
+
+def test_reads_utf8_file_with_bom_without_exposing_bom(tmp_path):
+    source = "VALUE = 42\n"
+    (tmp_path / "bom.py").write_bytes(b"\xef\xbb\xbf" + source.encode("utf-8"))
+
+    workspace = Workspace(tmp_path)
+    snapshot = workspace.read_text("bom.py")
+
+    assert snapshot.content == source
+    assert not snapshot.content.startswith("\ufeff")
+    assert snapshot.size_bytes == len(b"\xef\xbb\xbf" + source.encode("utf-8"))
+
+
+def test_reads_utf8_file_without_bom_unchanged(tmp_path):
+    source = "VALUE = 42\n"
+    (tmp_path / "plain.py").write_bytes(source.encode("utf-8"))
+
+    snapshot = Workspace(tmp_path).read_text("plain.py")
+
+    assert snapshot.content == source
+
+
+def test_resolve_create_path_allows_missing_nested_parents_without_creating_them(tmp_path):
+    workspace = Workspace(tmp_path)
+
+    target = workspace.resolve_create_path("src/modules/greeting.py")
+
+    assert target == tmp_path / "src" / "modules" / "greeting.py"
+    assert not (tmp_path / "src").exists()
+
+
+def test_resolve_create_path_rejects_symlinked_parent_escape(tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = root / "linked"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is not permitted in this environment")
+
+    with pytest.raises(WorkspacePathError, match="escapes"):
+        Workspace(root).resolve_create_path("linked/new.py")

@@ -33,6 +33,7 @@ class JournalEntry:
     resulting_hash: str | None = None
     recovery_bytes_b64: str | None = None
     error: str | None = None
+    created_directories: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,12 +48,16 @@ class JournalEntry:
             "resulting_hash": self.resulting_hash,
             "recovery_bytes_b64": self.recovery_bytes_b64,
             "error": self.error,
+            "created_directories": list(self.created_directories),
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "JournalEntry":
         try:
-            return cls(**value)
+            normalized = dict(value)
+            if "created_directories" in normalized:
+                normalized["created_directories"] = tuple(normalized["created_directories"])
+            return cls(**normalized)
         except (TypeError, ValueError) as exc:
             raise JournalError(f"Invalid journal entry: {exc}") from exc
 
@@ -93,6 +98,7 @@ class ChangeJournal:
         resulting_hash: str | None = None,
         recovery_bytes: bytes | None = None,
         error: str | None = None,
+        created_directories: tuple[str, ...] = (),
     ) -> JournalEntry:
         """Persist one event before returning it to the caller."""
         if not change_id.strip():
@@ -123,6 +129,7 @@ class ChangeJournal:
                             else None
                         ),
                         error=error,
+                        created_directories=tuple(created_directories),
                     )
 
                     payload = (

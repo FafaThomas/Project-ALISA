@@ -7,7 +7,10 @@ name = "alisa-coding-agent"
 version = "0.1.0"
 description = "Controlled software implementation and verification agent for ALISA"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "tree-sitter-language-pack>=1.20,<2",
+    "tomli>=2; python_version < '3.11'",
+]
 
 [project.scripts]
 coding-agent = "coding_agent.cli:main"

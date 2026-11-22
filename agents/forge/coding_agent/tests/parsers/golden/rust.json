@@ -1,0 +1,13 @@
+{
+  "language": "rust",
+  "symbols": [
+    [
+      "struct",
+      "User"
+    ],
+    [
+      "trait",
+      "Repository"
+    ]
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "language": "typescript",
+  "symbols": [
+    [
+      "interface",
+      "User"
+    ],
+    [
+      "type",
+      "UserId"
+    ]
+  ]
+}

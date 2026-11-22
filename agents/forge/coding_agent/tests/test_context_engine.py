@@ -372,3 +372,21 @@ def test_context_rejects_indexer_from_different_workspace(tmp_path):
             Workspace(authorized),
             code_indexer=indexer,
         )
+
+
+
+def test_inventory_includes_existing_files_omitted_from_source_selection(tmp_path):
+    (tmp_path / "App.jsx").write_text("export default function App() {}", encoding="utf-8")
+    (tmp_path / "Sidebar.jsx").write_text("export default function Sidebar() {}", encoding="utf-8")
+    (tmp_path / "Header.jsx").write_text("export default function Header() {}", encoding="utf-8")
+
+    package = ContextEngine(
+        Workspace(tmp_path),
+        max_files=1,
+    ).build(make_task(tmp_path, "Redesign dashboard"))
+
+    assert len(package.source_paths) == 1
+    assert set(package.inventory_paths) == {"App.jsx", "Sidebar.jsx", "Header.jsx"}
+    rendered = package.render()
+    assert "WORKSPACE FILE INVENTORY:" in rendered
+    assert "Sidebar.jsx" in rendered

@@ -159,3 +159,26 @@ def test_applied_journal_failure_attempts_rollback(
     assert result.change.state == ChangeState.ROLLED_BACK
     assert "rolled back" in result.change.error.lower()
     assert target.read_bytes() == original
+
+
+def test_nested_create_journals_created_directories_for_recovery(tmp_path):
+    workspace = Workspace(tmp_path)
+    journal = ChangeJournal(tmp_path / "journal.jsonl")
+    coordinator = ChangeCoordinator(workspace, journal=journal)
+    desired = b"VALUE = 1\n"
+    change = make_change("src/modules/new.py", "create", None, desired)
+    proposal = FileChange(
+        path="src/modules/new.py",
+        change_type=ChangeType.CREATE,
+        reason="Create nested module",
+        content=desired.decode(),
+    )
+
+    applied = coordinator.apply(change, proposal)
+    assert applied.recovery is not None
+    applied_entry = [entry for entry in journal.read_all() if entry.event == "applied"][0]
+    assert applied_entry.created_directories == ("src", "src/modules")
+
+    rolled_back = coordinator.rollback(applied)
+    assert rolled_back.change.state == ChangeState.ROLLED_BACK
+    assert not (tmp_path / "src").exists()

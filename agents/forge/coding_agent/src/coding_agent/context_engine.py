@@ -16,6 +16,7 @@ from coding_agent.code_index import CodeIndex, CodeIndexer
 
 IGNORED_DIRECTORIES = {
     ".git",
+    ".coding-agent",
     ".hg",
     ".svn",
     ".venv",
@@ -104,6 +105,8 @@ class ContextPackage:
     omitted_files: int
     truncated: bool
     code_structure: str = ""
+    inventory_paths: tuple[str, ...] = ()
+    inventory_truncated: bool = False
 
     @property
     def source_paths(self) -> tuple[str, ...]:
@@ -135,6 +138,11 @@ class ContextPackage:
             sections.extend(self.directory_tree)
         else:
             sections.append("(No directories discovered.)")
+
+        sections.extend(["", "WORKSPACE FILE INVENTORY:"])
+        sections.extend(self.inventory_paths or ("(No eligible files discovered.)",))
+        if self.inventory_truncated:
+            sections.append("[Workspace inventory is bounded; additional files may exist.]")
 
         if self.code_structure:
             sections.extend([
@@ -494,6 +502,8 @@ class ContextEngine:
             omitted_files=omitted,
             truncated=truncated,
             code_structure=code_structure,
+            inventory_paths=tuple(item.relative_path for item in candidates),
+            inventory_truncated=discovered >= self.max_candidates,
         )
 
     def _expand_candidates(
@@ -522,8 +532,8 @@ class ContextEngine:
         seed_paths = {
             item.relative_path
             for item in candidates
-            if Path(item.relative_path).suffix.lower() == ".py"
-            and item.task_score > 0
+            if item.task_score > 0
+            and item.relative_path in {module.relative_path for module in index.modules}
         }
 
         # Resolve explicitly mentioned symbols to their defining files.
@@ -542,54 +552,58 @@ class ContextEngine:
             module.relative_path: module
             for module in index.modules
         }
+        graph = index.build_knowledge_graph()
 
         for seed_path in sorted(seed_paths):
             module = modules_by_path.get(seed_path)
-
             if module is None or module.parse_error:
                 continue
 
             reasons[seed_path].add("matches task-relevant code")
+            module_node_id = f"module:{seed_path}"
+            related_node_ids = [module_node_id]
+            related_node_ids.extend(
+                node.id for node in graph.find_nodes(kind="symbol", path=seed_path)
+            )
 
-            for module_name in module.module_names:
-                # Outgoing edges: modules this file imports.
-                for dependency in index.dependencies_of(module_name):
-                    for target in index.find_module(
-                        dependency.target_module
-                    ):
-                        target_path = target.relative_path
-
-                        if target_path not in candidate_lookup:
-                            continue
-
-                        reasons[target_path].add(
-                            f"dependency of {seed_path}"
-                        )
-                        scores[target_path] += 40
-
-                # Incoming edges: files that import this module.
-                for dependent in index.dependents_of(module_name):
-                    dependent_path = dependent.relative_path
-
-                    if dependent_path not in candidate_lookup:
+            outgoing_paths = set()
+            incoming_paths = set()
+            for node_id in related_node_ids:
+                for edge in graph.outgoing(node_id, statuses={"resolved"}):
+                    if edge.kind in {"contains", "candidate"}:
                         continue
+                    target_node = graph.get_node(edge.target_id)
+                    if target_node and target_node.path and target_node.path != seed_path:
+                        outgoing_paths.add(target_node.path)
+                for edge in graph.incoming(node_id, statuses={"resolved"}):
+                    if edge.kind in {"contains", "candidate"}:
+                        continue
+                    source_node = graph.get_node(edge.source_id)
+                    if source_node and source_node.path and source_node.path != seed_path:
+                        incoming_paths.add(source_node.path)
 
-                    reasons[dependent_path].add(
-                        f"depends on {seed_path}"
-                    )
-                    scores[dependent_path] += 30
+            # Outgoing graph edges: dependencies referenced by this file.
+            for target_path in sorted(outgoing_paths):
+                if target_path not in candidate_lookup:
+                    continue
+                reasons[target_path].add(f"dependency of {seed_path}")
+                scores[target_path] += 40
 
-                    # Give test files a small additional relevance boost.
-                    name = Path(dependent_path).name.lower()
-                    if (
-                        name.startswith("test_")
-                        or name.endswith("_test.py")
-                        or "tests" in Path(dependent_path).parts
-                    ):
-                        reasons[dependent_path].add(
-                            "related test module"
-                        )
-                        scores[dependent_path] += 15
+            # Incoming graph edges: files that depend on this file.
+            for dependent_path in sorted(incoming_paths):
+                if dependent_path not in candidate_lookup:
+                    continue
+                reasons[dependent_path].add(f"depends on {seed_path}")
+                scores[dependent_path] += 30
+
+                name = Path(dependent_path).name.lower()
+                if (
+                    name.startswith("test_")
+                    or name.endswith("_test.py")
+                    or "tests" in Path(dependent_path).parts
+                ):
+                    reasons[dependent_path].add("related test module")
+                    scores[dependent_path] += 15
 
         return {
             path: (score, tuple(sorted(file_reasons)))
@@ -616,7 +630,7 @@ class ContextEngine:
         ]
 
         sections = [
-            "Selected Python modules and their declarations:"
+            "Selected modules and their declarations:"
         ]
 
         selected_names = {
@@ -669,6 +683,27 @@ class ContextEngine:
                 f"{dependency.target_module} "
                 f"[{target_path}]"
             )
+
+        graph = index.build_knowledge_graph()
+        selected_node_ids = {f"module:{path}" for path in selected_paths}
+        selected_node_ids.update(
+            node.id for path in selected_paths
+            for node in graph.find_nodes(kind="symbol", path=path)
+        )
+        typed_edges = []
+        for edge in graph.edges:
+            if edge.source_id not in selected_node_ids or edge.kind in {"contains", "candidate"}:
+                continue
+            source = graph.get_node(edge.source_id)
+            target = graph.get_node(edge.target_id)
+            if source and target:
+                typed_edges.append(
+                    f"  {edge.kind}: {source.label} -> {target.label} "
+                    f"[{edge.status}; {target.path or target.kind}]"
+                )
+        if typed_edges:
+            sections.append("\nRelevant typed graph relationships:")
+            sections.extend(typed_edges)
 
         rendered = "\n".join(sections)
 

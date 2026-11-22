@@ -1,0 +1,17 @@
+{
+  "language": "go",
+  "symbols": [
+    [
+      "package",
+      "demo"
+    ],
+    [
+      "struct",
+      "User"
+    ],
+    [
+      "function",
+      "NewUser"
+    ]
+  ]
+}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -60,7 +60,7 @@ class Workspace:
             raise WorkspacePathError("Path must not be empty")
 
         supplied = Path(raw)
-        if supplied.is_absolute() or supplied.drive:
+        if supplied.is_absolute() or supplied.drive or PureWindowsPath(raw).is_absolute() or PureWindowsPath(raw).drive:
             raise WorkspacePathError("Absolute paths are not allowed")
 
         # Reject traversal explicitly, even if normalization would bring the
@@ -88,36 +88,51 @@ class Workspace:
         return resolved
 
     def resolve_create_path(self, relative_path: str | Path) -> Path:
-        raw = str(relative_path).strip()
+        """Validate a new file path, allowing missing parent directories.
 
+        No directories are created here. Every existing ancestor is resolved
+        so symlinked paths cannot redirect writes outside the workspace.
+        """
+        raw = str(relative_path).strip()
         if not raw:
             raise WorkspacePathError("Empty paths are not allowed")
 
         supplied = Path(raw)
-
-        if supplied.is_absolute() or supplied.drive:
+        windows_path = PureWindowsPath(raw)
+        if supplied.is_absolute() or supplied.drive or windows_path.is_absolute() or windows_path.drive:
             raise WorkspacePathError("Absolute paths are not allowed")
+        normalized_parts = raw.replace("\\", "/").split("/")
+        if any(part in {"", ".", ".."} for part in normalized_parts):
+            raise WorkspacePathError("Parent traversal or invalid path component")
 
-        if ".." in supplied.parts:
-            raise WorkspacePathError("Parent traversal is not allowed")
-
-        candidate = self.root / supplied
-
-        # The parent must already exist and be resolvable.
-        try:
-            parent = candidate.parent.resolve(strict=True)
-        except FileNotFoundError as exc:
-            raise WorkspacePathError("Parent directory does not exist") from exc
-
-        # Ensure the resolved parent remains inside the workspace.
-        if not parent.is_relative_to(self.root):
-            raise WorkspacePathError("Path escapes workspace")
-
-        # Reject existing targets and dangling symlinks.
+        candidate = self.root.joinpath(*normalized_parts)
         if candidate.exists() or candidate.is_symlink():
             raise WorkspacePathError("Target already exists")
 
-        return parent / candidate.name
+        missing: list[str] = []
+        ancestor = candidate.parent
+        while not ancestor.exists() and not ancestor.is_symlink():
+            missing.append(ancestor.name)
+            parent = ancestor.parent
+            if parent == ancestor:
+                raise WorkspacePathError("No existing workspace ancestor")
+            ancestor = parent
+
+        try:
+            resolved_ancestor = ancestor.resolve(strict=True)
+            resolved_ancestor.relative_to(self.root)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise WorkspacePathError("Path escapes workspace or has unsafe ancestor") from exc
+
+        if not resolved_ancestor.is_dir():
+            raise WorkspacePathError("Parent path is not a directory")
+
+        # Rebuild from the resolved ancestor to retain the authorized physical
+        # path while leaving absent components uncreated.
+        result = resolved_ancestor
+        for part in reversed(missing):
+            result = result / part
+        return result / candidate.name
 
     def read_text(
         self,
@@ -153,8 +168,16 @@ class Workspace:
                         f"File exceeds size limit of {self.max_file_bytes} bytes"
                     )
 
+            # UTF-8 text files may include a leading BOM (common in files
+            # created by Windows editors). Treat it as an encoding signature,
+            # not as source text. Keep other requested encodings unchanged.
+            decode_encoding = (
+                "utf-8-sig"
+                if encoding.lower().replace("_", "-") in {"utf-8", "utf8"}
+                else encoding
+            )
             try:
-                content = data.decode(encoding)
+                content = data.decode(decode_encoding)
             except UnicodeDecodeError as exc:
                 raise WorkspaceFileError(
                     f"File cannot be decoded as {encoding}: {relative_path}"

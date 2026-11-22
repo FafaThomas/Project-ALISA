@@ -89,14 +89,21 @@ class CommandRunner:
             )
 
         try:
-            approved = tuple(
-                self._validate_command(item)
-                for item in approved_commands
-            )
+            approved_items = iter(approved_commands)
         except TypeError as exc:
             raise CommandValidationError(
                 "Approved commands must be iterable"
             ) from exc
+
+        approved: list[tuple[str, ...]] = []
+        for item in approved_items:
+            try:
+                approved.append(self._validate_command(item))
+            except CommandValidationError:
+                # A malformed sibling approval must not block a valid command
+                # that independently appears in the approval list. It is never
+                # normalized into an executable command.
+                continue
 
         if command not in approved:
             raise CommandAuthorizationError(
@@ -194,10 +201,17 @@ class CommandRunner:
         stderr_parts: list[str] = []
         output_lock = threading.Lock()
 
+        # Prevent Python verification commands from writing bytecode caches
+        # into the user's workspace. Pytest cache is disabled separately by
+        # VerificationPlanner when it selects pytest.
+        command_environment = os.environ.copy()
+        command_environment["PYTHONDONTWRITEBYTECODE"] = "1"
+
         try:
             process = subprocess.Popen(
                 normalized,
                 cwd=workspace_root,
+                env=command_environment,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

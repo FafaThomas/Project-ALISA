@@ -1,3 +1,7 @@
+tree-sitter-language-pack<2,>=1.20
+
+[:python_version < "3.11"]
+tomli>=2
 
 [test]
 pytest>=8

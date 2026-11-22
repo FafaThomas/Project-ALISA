@@ -43,6 +43,7 @@ class RecoveryCandidate:
     assessment: str
     status: RecoveryStatus
     current_hash: str | None
+    created_directories: tuple[str, ...] = ()
 
 
 class RecoveryAction(str, Enum):
@@ -208,6 +209,7 @@ def assess_recovery(
                 assessment=assessment,
                 status=status,
                 current_hash=current_hash,
+                created_directories=entry.created_directories,
             )
         )
 
@@ -468,6 +470,7 @@ def execute_recovery(
             operation=candidate.operation,
             original_bytes=candidate.recovery_bytes,
             resulting_hash=candidate.resulting_hash,
+            created_directories=candidate.created_directories,
         )
 
         try:
@@ -487,6 +490,7 @@ def execute_recovery(
                 original_hash=candidate.original_hash,
                 resulting_hash=candidate.resulting_hash,
                 recovery_bytes=candidate.recovery_bytes,
+                created_directories=candidate.created_directories,
                 error="Interrupted rollback completed during recovery.",
             )
         except Exception as exc:

@@ -1,4 +1,4 @@
-﻿"""Core data contracts for the ALISA Coding Agent.
+"""Core data contracts for the ALISA Coding Agent.
 
 These models describe tasks, proposed changes, implementation plans,
 and observed execution outcomes. They do not perform file operations.
@@ -121,6 +121,18 @@ class CommandResult:
 
 
 @dataclass(frozen=True)
+class AttemptRecord:
+    """Summary of one planning/implementation attempt."""
+
+    attempt_number: int
+    phase: str
+    outcome: str
+    summary: str = ""
+    errors: tuple[str, ...] = ()
+    retry_decision: str | None = None
+
+
+@dataclass(frozen=True)
 class ExecutionResult:
     """Observed outcome of applying a plan and running verification."""
 
@@ -130,6 +142,14 @@ class ExecutionResult:
     command_results: tuple[CommandResult, ...] = ()
     errors: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    attempt_history: tuple[AttemptRecord, ...] = ()
+    plan_summary: str = ""
+    proposed_changes: tuple[FileChange, ...] = ()
+    specification_report: dict | None = None
+
+    @property
+    def attempt_count(self) -> int:
+        return len(self.attempt_history)
 
     @property
     def verification_passed(self) -> bool:

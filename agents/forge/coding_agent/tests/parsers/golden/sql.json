@@ -1,0 +1,17 @@
+{
+  "language": "sql",
+  "symbols": [
+    [
+      "table",
+      "users"
+    ],
+    [
+      "column",
+      "id"
+    ],
+    [
+      "column",
+      "name"
+    ]
+  ]
+}

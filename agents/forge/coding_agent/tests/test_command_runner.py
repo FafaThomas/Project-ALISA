@@ -143,3 +143,33 @@ def test_missing_executable_is_reported(tmp_path):
     assert result.exit_code is None
     assert not result.succeeded
     assert result.stderr
+
+
+def test_python_commands_do_not_create_workspace_bytecode_cache(tmp_path):
+    runner = make_runner(tmp_path)
+    (tmp_path / "sample_module.py").write_text("VALUE = 42\n", encoding="utf-8")
+    command = (
+        sys.executable,
+        "-c",
+        "import sample_module; print(sample_module.VALUE)",
+    )
+
+    result = runner.run(command, approved_commands=[command])
+
+    assert result.succeeded
+    assert result.stdout.strip() == "42"
+    assert not (tmp_path / "__pycache__").exists()
+
+
+def test_malformed_sibling_approval_does_not_block_exact_valid_approval(tmp_path):
+    runner = make_runner(tmp_path)
+    command = (sys.executable, "-c", "print('verified')")
+    approved = [
+        ("python", " ", "backend/manage.py", "check"),
+        command,
+    ]
+
+    result = runner.run(command, approved_commands=approved)
+
+    assert result.succeeded
+    assert result.stdout.strip() == "verified"

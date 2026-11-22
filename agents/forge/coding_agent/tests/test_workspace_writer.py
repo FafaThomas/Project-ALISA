@@ -360,3 +360,74 @@ def test_apply_delete_then_rollback(tmp_path):
     assert rolled_back.operation == "rollback_delete"
     assert target.read_bytes() == original
 
+
+
+def test_create_nested_file_and_rollback_removes_only_created_empty_directories(tmp_path):
+    workspace = Workspace(tmp_path)
+    (tmp_path / "existing").mkdir()
+    writer = WorkspaceWriter(workspace)
+    desired = b"VALUE = 1\n"
+    proposal = FileChange(
+        path="existing/src/modules/new.py",
+        change_type=ChangeType.CREATE,
+        reason="Create nested module",
+        content=desired.decode(),
+    )
+    record = make_change(proposal.path, "create", None, desired)
+
+    applied = writer.apply(record, proposal)
+    assert applied.applied
+    assert applied.recovery.created_directories == ("existing/src", "existing/src/modules")
+    assert (tmp_path / proposal.path).read_bytes() == desired
+
+    rolled_back = writer.rollback(applied.recovery)
+    assert rolled_back.applied
+    assert not (tmp_path / proposal.path).exists()
+    assert not (tmp_path / "existing/src/modules").exists()
+    assert not (tmp_path / "existing/src").exists()
+    assert (tmp_path / "existing").is_dir()
+
+
+def test_rollback_preserves_created_directory_when_it_contains_unrelated_file(tmp_path):
+    workspace = Workspace(tmp_path)
+    writer = WorkspaceWriter(workspace)
+    desired = b"VALUE = 1\n"
+    proposal = FileChange(
+        path="src/modules/new.py",
+        change_type=ChangeType.CREATE,
+        reason="Create nested module",
+        content=desired.decode(),
+    )
+    record = make_change(proposal.path, "create", None, desired)
+    applied = writer.apply(record, proposal)
+    (tmp_path / "src/modules/keep.txt").write_text("keep", encoding="utf-8")
+
+    writer.rollback(applied.recovery)
+
+    assert (tmp_path / "src/modules/keep.txt").read_text(encoding="utf-8") == "keep"
+    assert (tmp_path / "src/modules").is_dir()
+
+
+def test_failed_nested_create_cleans_up_file_and_new_directories(tmp_path, monkeypatch):
+    import coding_agent.workspace_writer as writer_module
+
+    workspace = Workspace(tmp_path)
+    writer = WorkspaceWriter(workspace)
+    desired = b"VALUE = 1\n"
+    proposal = FileChange(
+        path="src/modules/new.py",
+        change_type=ChangeType.CREATE,
+        reason="Create nested module",
+        content=desired.decode(),
+    )
+    record = make_change(proposal.path, "create", None, desired)
+
+    def fail_fsync(_fd):
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(writer_module.os, "fsync", fail_fsync)
+
+    with pytest.raises(WorkspaceWriteError, match="Could not create file"):
+        writer.apply(record, proposal)
+
+    assert not (tmp_path / "src").exists()

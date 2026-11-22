@@ -1,6 +1,8 @@
 
 from coding_agent.code_index import CodeIndexer
+from coding_agent.parsers import ParserRegistry, PythonParser
 from coding_agent.workspace import Workspace
+
 
 
 def make_workspace(tmp_path):
@@ -262,3 +264,96 @@ def test_rejects_invalid_configuration(tmp_path):
         assert "max_files" in str(exc)
     else:
         raise AssertionError("Expected invalid configuration to fail")
+
+def test_python_parser_parses_source_independently():
+    parser = PythonParser()
+
+    parsed = parser.parse(
+        "service.py",
+        """
+class UserService:
+    def create_user(self, name):
+        return name
+
+
+def validate_user(name):
+    return bool(name)
+""",
+    )
+
+    names = {
+        (symbol.qualified_name, symbol.kind)
+        for symbol in parsed.symbols
+    }
+
+    assert ("UserService", "class") in names
+    assert ("UserService.create_user", "method") in names
+    assert ("validate_user", "function") in names
+
+
+def test_parser_registry_resolves_python_files():
+    registry = ParserRegistry([PythonParser()])
+
+    parser = registry.get_parser("src/service.py")
+
+    assert isinstance(parser, PythonParser)
+    assert registry.get_parser("src/service.cs") is None
+    assert registry.supported_extensions == (".py",)
+
+
+def test_indexer_indexes_supported_extensions_and_ignores_unsupported(
+    tmp_path,
+):
+    (tmp_path / "main.py").write_text(
+        "def main():\n    pass\n",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "Program.cs").write_text(
+        "public class Program { }",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "notes.xyz").write_text(
+        "This is an unsupported file format.",
+        encoding="utf-8",
+    )
+
+    index = CodeIndexer(make_workspace(tmp_path)).build()
+
+    modules = {
+        module.relative_path: module
+        for module in index.modules
+    }
+
+    assert set(modules) == {"main.py", "Program.cs"}
+
+    assert modules["main.py"].language == "python"
+    assert modules["Program.cs"].language == "csharp"
+
+    assert index.discovered_files == 2
+    assert index.indexed_files == 2
+
+
+def test_code_index_preserves_parser_references_for_later_resolution(tmp_path):
+    from coding_agent.parsers.base import ParsedSource, ReferenceRecord
+
+    class ReferenceParser:
+        language = "reference-test"
+        extensions = (".ref",)
+
+        def parse(self, relative_path, source):
+            return ParsedSource(
+                symbols=(),
+                imports=(),
+                references=(
+                    ReferenceRecord("Customer", "schema_reference", 4, "orders.customer_id"),
+                ),
+            )
+
+    (tmp_path / "schema.ref").write_text("reference source", encoding="utf-8")
+    registry = ParserRegistry([ReferenceParser()])
+    index = CodeIndexer(make_workspace(tmp_path), parser_registry=registry).build()
+
+    assert index.modules[0].references[0].target == "Customer"
+    assert "reference (schema_reference): Customer" in index.render()

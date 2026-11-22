@@ -42,6 +42,7 @@ class ChangeCoordinator:
         *,
         recovery_bytes: bytes | None = None,
         error: str | None = None,
+        created_directories: tuple[str, ...] = (),
     ) -> None:
         """Append an event when journaling is enabled."""
         if self.journal is None:
@@ -57,6 +58,7 @@ class ChangeCoordinator:
             resulting_hash=change.resulting_hash,
             recovery_bytes=recovery_bytes,
             error=error,
+            created_directories=created_directories,
         )
 
     def _original_bytes(self, change: WorkspaceChange) -> bytes | None:
@@ -125,6 +127,7 @@ class ChangeCoordinator:
                 applied,
                 "applied",
                 recovery_bytes=original_bytes,
+                created_directories=result.recovery.created_directories,
             )
         except JournalError as exc:
             # The file has changed, but the outcome could not be persisted.
@@ -259,6 +262,7 @@ class ChangeCoordinator:
                 change,
                 "rollback_intent",
                 recovery_bytes=recovery.original_bytes,
+                created_directories=recovery.created_directories,
             )
         except JournalError as exc:
             failed = change.transition(
@@ -277,6 +281,7 @@ class ChangeCoordinator:
                     "failed",
                     recovery_bytes=recovery.original_bytes,
                     error=str(exc),
+                    created_directories=recovery.created_directories,
                 )
             except JournalError:
                 pass
@@ -288,6 +293,7 @@ class ChangeCoordinator:
                 rolled_back,
                 "rolled_back",
                 recovery_bytes=recovery.original_bytes,
+                created_directories=recovery.created_directories,
             )
         except JournalError as exc:
             # The filesystem rollback succeeded; don't claim it failed.
