@@ -16,6 +16,7 @@ class ChangeType(str, Enum):
     CREATE = "create"
     MODIFY = "modify"
     DELETE = "delete"
+    MKDIR = "mkdir"
 
 
 class TaskStatus(str, Enum):
@@ -50,7 +51,7 @@ class CodingTask:
 
 @dataclass(frozen=True)
 class FileChange:
-    """A proposed operation on a workspace-relative file path."""
+    """A proposed file operation or explicit directory-creation operation."""
 
     path: str
     change_type: ChangeType
@@ -61,8 +62,8 @@ class FileChange:
         normalized = self.path.replace("\\", "/")
         candidate = PurePosixPath(normalized)
 
-        if not normalized.strip():
-            raise ValueError("path must not be empty")
+        if not normalized.strip() or normalized.strip().rstrip("/") in {"", "."}:
+            raise ValueError("path must identify a workspace-relative target")
         if candidate.is_absolute() or candidate.anchor:
             raise ValueError("path must be workspace-relative")
         if any(part == ".." for part in candidate.parts):
@@ -70,8 +71,8 @@ class FileChange:
         if not self.reason.strip():
             raise ValueError("reason must not be empty")
 
-        if self.change_type == ChangeType.DELETE and self.content is not None:
-            raise ValueError("delete operations must not include file content")
+        if self.change_type in (ChangeType.DELETE, ChangeType.MKDIR) and self.content is not None:
+            raise ValueError(f"{self.change_type.value} operations must not include file content")
         if self.change_type in (ChangeType.CREATE, ChangeType.MODIFY):
             if self.content is None:
                 raise ValueError(
@@ -96,7 +97,7 @@ class ImplementationPlan:
         if not self.summary.strip():
             raise ValueError("summary must not be empty")
 
-        paths = [change.path.replace("\\", "/") for change in self.changes]
+        paths = [change.path.replace("\\", "/").rstrip("/") for change in self.changes]
         if len(paths) != len(set(paths)):
             raise ValueError("a plan must not change the same path more than once")
 

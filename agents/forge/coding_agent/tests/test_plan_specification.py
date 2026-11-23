@@ -556,3 +556,215 @@ volumes:
     ))
     report = PlanSpecificationValidator().validate(plan_with_content, specification)
     assert report.valid, report.semantic_issues
+
+
+def test_directory_only_requirement_is_covered_by_required_structural_verification(tmp_path):
+    spec = EngineeringSpecification(
+        "spec-layout", "task-1", "Create repository layout", str(tmp_path),
+        requirements=(
+            Requirement(
+                "REQ-DIR",
+                "Establish frontend/, backend/, and postgres/ directories.",
+                RequirementKind.FUNCTIONAL,
+                ("The frontend, backend, and postgres directories exist.",),
+            ),
+            Requirement(
+                "REQ-FILE", "Create the root .dockerignore file.",
+                RequirementKind.FUNCTIONAL,
+                ("The root .dockerignore file exists.",),
+            ),
+        ),
+        architecture=(ArchitectureModule(
+            "root", "Root", "Root configuration", file_paths=(".dockerignore",)
+        ),),
+        implementation_units=(ImplementationUnit(
+            "ignore", "Root ignore rules", ".dockerignore",
+            satisfies=("REQ-FILE",),
+        ),),
+        verification=(
+            VerificationCriterion(
+                "VER-DIR", "Verify frontend, backend, and postgres directories exist.",
+                VerificationKind.STRUCTURAL,
+                command=("python", "-c", "assert True"),
+                covers=("REQ-DIR",),
+            ),
+            VerificationCriterion(
+                "VER-FILE", "Verify the root .dockerignore file exists.",
+                VerificationKind.STRUCTURAL,
+                command=("python", "-c", "assert True"),
+                covers=("REQ-FILE",),
+            ),
+        ),
+    )
+
+    directory_changes = tuple(
+        FileChange(path, ChangeType.MKDIR, "Create required repository directory")
+        for path in ("frontend", "backend", "postgres")
+    )
+    complete_plan = ImplementationPlan(
+        "task-1", "Create repository layout", directory_changes + plan(".dockerignore").changes
+    )
+    report = PlanSpecificationValidator().validate(complete_plan, spec)
+
+    assert report.valid
+    assert report.covered_requirements == ("REQ-DIR", "REQ-FILE")
+
+
+def test_directory_only_requirement_without_structural_verification_is_not_covered(tmp_path):
+    spec = EngineeringSpecification(
+        "spec-layout", "task-1", "Create repository layout", str(tmp_path),
+        requirements=(Requirement(
+            "REQ-DIR",
+            "Establish frontend/, backend/, and postgres/ directories.",
+            RequirementKind.FUNCTIONAL,
+            ("The frontend, backend, and postgres directories exist.",),
+        ),),
+        architecture=(ArchitectureModule(
+            "root", "Root", "Root configuration", file_paths=(".dockerignore",)
+        ),),
+        implementation_units=(),
+        verification=(VerificationCriterion(
+            "VER-MANUAL", "Review the repository files.",
+            VerificationKind.MANUAL,
+            covers=("REQ-DIR",),
+        ),),
+    )
+
+    report = PlanSpecificationValidator().validate(
+        ImplementationPlan("task-1", "No file changes", ()), spec
+    )
+
+    assert not report.valid
+    assert report.missing_requirements == ("REQ-DIR",)
+
+
+def test_directory_only_requirement_fails_without_mkdir_when_directories_are_missing(tmp_path):
+    spec = EngineeringSpecification(
+        "spec-layout-missing", "task-1", "Create repository layout", str(tmp_path),
+        requirements=(Requirement(
+            "REQ-DIR", "Establish frontend/ and backend/ directories.",
+            RequirementKind.FUNCTIONAL,
+            ("The frontend and backend directories exist.",),
+        ),),
+        verification=(VerificationCriterion(
+            "VER-DIR", "Verify frontend and backend directories exist.",
+            VerificationKind.STRUCTURAL,
+            command=("python", "-c", "assert True"),
+            covers=("REQ-DIR",),
+        ),),
+    )
+    report = PlanSpecificationValidator().validate(
+        ImplementationPlan("task-1", "No directory operations", ()), spec
+    )
+    assert not report.valid
+    assert report.missing_requirements == ("REQ-DIR",)
+
+
+def test_directory_only_requirement_can_reuse_existing_directories(tmp_path):
+    (tmp_path / "frontend").mkdir()
+    (tmp_path / "backend").mkdir()
+    spec = EngineeringSpecification(
+        "spec-layout-existing", "task-1", "Ensure repository layout", str(tmp_path),
+        requirements=(Requirement(
+            "REQ-DIR", "Establish frontend/ and backend/ directories.",
+            RequirementKind.FUNCTIONAL,
+            ("The frontend and backend directories exist.",),
+        ),),
+        verification=(VerificationCriterion(
+            "VER-DIR", "Verify frontend and backend directories exist.",
+            VerificationKind.STRUCTURAL,
+            command=("python", "-c", "assert True"),
+            covers=("REQ-DIR",),
+        ),),
+    )
+    report = PlanSpecificationValidator().validate(
+        ImplementationPlan("task-1", "Reuse existing directories", ()), spec
+    )
+    assert report.valid
+    assert report.covered_requirements == ("REQ-DIR",)
+
+
+def test_explicit_directory_is_not_satisfied_only_as_a_file_creation_side_effect(tmp_path):
+    spec = EngineeringSpecification(
+        "spec-dir-file", "task-1", "Create frontend ignore file and directory", str(tmp_path),
+        requirements=(Requirement(
+            "REQ-1",
+            "Create frontend/ directory and frontend/.dockerignore.",
+            RequirementKind.FUNCTIONAL,
+            ("The frontend directory and ignore file exist.",),
+        ),),
+        architecture=(ArchitectureModule(
+            "frontend", "Frontend", "Frontend setup",
+            file_paths=("frontend/.dockerignore",),
+        ),),
+        implementation_units=(ImplementationUnit(
+            "UNIT-1", "Frontend ignore", "frontend/.dockerignore",
+            satisfies=("REQ-1",),
+        ),),
+    )
+    file_only = plan("frontend/.dockerignore")
+    report = PlanSpecificationValidator().validate(file_only, spec)
+    assert not report.valid
+    assert report.missing_requirements == ("REQ-1",)
+
+    complete = ImplementationPlan(
+        "task-1", "Create frontend directory and ignore file",
+        (FileChange("frontend", ChangeType.MKDIR, "Create frontend directory"),
+         FileChange("frontend/.dockerignore", ChangeType.CREATE, "Create ignore file", "node_modules\n")),
+    )
+    assert PlanSpecificationValidator().validate(complete, spec).valid
+
+
+def test_plan_validator_reports_unimplemented_acceptance_criterion(tmp_path):
+    requirement = Requirement(
+        "REQ-1", "Users can sign in.",
+        acceptance_criteria=("Valid credentials create a session.",),
+    )
+    criterion_id = requirement.acceptance_criterion_ids[0]
+    spec = EngineeringSpecification(
+        "spec-acceptance", "task-1", "Implement sign-in", str(tmp_path),
+        requirements=(requirement,),
+        implementation_units=(ImplementationUnit(
+            "UNIT-1", "Sign-in implementation", "src/auth.py",
+            satisfies=("REQ-1",),
+            implements_acceptance_criteria=(criterion_id,),
+        ),),
+        verification=(VerificationCriterion(
+            "VER-1", "Verify valid credentials create a session.",
+            VerificationKind.BEHAVIORAL,
+            command=("pytest",),
+            covers=("REQ-1",),
+            covers_acceptance_criteria=(criterion_id,),
+        ),),
+    )
+
+    report = PlanSpecificationValidator().validate(
+        ImplementationPlan("task-1", "No implementation", ()), spec
+    )
+
+    assert not report.valid
+    assert report.missing_acceptance_criteria == (criterion_id,)
+    assert any(criterion_id in issue for issue in report.issues)
+
+
+def test_plan_validator_reports_acceptance_criterion_when_mapped_unit_is_omitted(tmp_path):
+    requirement = Requirement(
+        "REQ-1", "Users can sign in.",
+        acceptance_criteria=("Valid credentials create a session.",),
+    )
+    criterion_id = requirement.acceptance_criterion_ids[0]
+    spec = EngineeringSpecification(
+        "spec-acceptance", "task-1", "Implement sign-in", str(tmp_path),
+        requirements=(requirement,),
+        implementation_units=(ImplementationUnit(
+            "UNIT-1", "Sign-in implementation", "src/auth.py",
+            satisfies=("REQ-1",),
+            implements_acceptance_criteria=(criterion_id,),
+        ),),
+    )
+
+    report = PlanSpecificationValidator().validate(
+        ImplementationPlan("task-1", "Omit auth", ()), spec
+    )
+    assert not report.valid
+    assert report.missing_acceptance_criteria == (criterion_id,)

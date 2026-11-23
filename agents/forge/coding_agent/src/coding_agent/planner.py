@@ -161,8 +161,24 @@ class CodingPlanner:
             else {}
         )
         implementation_group_sections = []
+        directory_targets = set()
+        if specification is not None:
+            import re
+            for requirement in specification.requirements:
+                if requirement.kind.value != "constraint" and re.search(r"\b(?:directory|directories|folder|folders|layout|structure)\b", requirement.description + " " + " ".join(requirement.acceptance_criteria), re.I):
+                    text = requirement.description + " " + " ".join(requirement.acceptance_criteria)
+                    directory_targets.update(
+                        match.rstrip("/") for match in re.findall(
+                            r"(?<![A-Za-z0-9_.-])((?:[A-Za-z0-9_.-]+/)+)", text
+                        )
+                        if match.strip("/").casefold() not in {"root", "."}
+                        and all(part not in {"", ".", ".."} for part in match.rstrip("/").split("/"))
+                        and ":" not in match.split("/", 1)[0]
+                    )
         for path, units in sorted(implementation_file_groups.items()):
-            lines = [f"- FILE: {path}"]
+            normalized_group_path = path.replace("\\", "/").rstrip("/")
+            group_kind = "DIRECTORY" if normalized_group_path in directory_targets else "FILE"
+            lines = [f"- {group_kind}: {normalized_group_path}"]
             for unit in units:
                 lines.append(
                     f"  UNIT: {unit.unit_id} — {unit.title} "
@@ -195,6 +211,24 @@ class CodingPlanner:
             validation_feedback = validation_marker + validation_feedback
 
         domain_guidance = self._domain_artifact_guidance(specification)
+        directory_obligations = []
+        if specification is not None:
+            import re
+            for requirement in specification.requirements:
+                text = " ".join((requirement.description, *requirement.acceptance_criteria))
+                if requirement.kind.value != "constraint" and re.search(r"\b(?:directory|directories|folder|folders|layout|structure)\b", text, re.I):
+                    paths = [
+                        path for path in re.findall(
+                            r"(?<![A-Za-z0-9_.-])((?:[A-Za-z0-9_.-]+/)+)", text
+                        ) if path.strip("/").casefold() not in {"root", "."}
+                        and all(part not in {"", ".", ".."} for part in path.rstrip("/").split("/"))
+                        and ":" not in path.split("/", 1)[0]
+                    ]
+                    if paths:
+                        directory_obligations.append(
+                            f"- {requirement.requirement_id}: " + ", ".join(dict.fromkeys(path.rstrip("/") for path in paths))
+                        )
+        directory_obligations_text = "\n".join(directory_obligations) or "- (No explicit directory-creation obligations.)"
 
         prompt = f"""
 Create an implementation plan for this software engineering task.
@@ -227,18 +261,21 @@ DOMAIN-SPECIFIC ARTIFACT GUIDANCE:
 {domain_guidance if domain_guidance else "(No specialized artifact template applies.)"}
 
 IMPLEMENTATION COVERAGE CONTRACT:
-- Treat the Engineering Specification's implementation_units array as the authoritative list of work that this plan must implement.
+- Treat the Engineering Specification and explicit directory obligations as authoritative. For FILE units, propose a file change. For DIRECTORY units and every missing explicit directory listed above, propose change_type "mkdir" at that exact path, with content null. Directory operations are distinct from file changes.
 - Every implementation unit is mandatory.
-- The plan format permits only one FileChange per path. Group implementation units by target_path and create exactly one planned file change for each unique target_path.
-- When multiple units share the same target_path, that single file change must implement the combined acceptance criteria and contract obligations of ALL units in that path group. One change DOES cover all units in the same-path group when its content satisfies their combined criteria.
-- Units with different target_path values are separate obligations and each requires its own planned file change at that exact path.
+- Group implementation units by target_path and create exactly one operation for each unique target_path. A DIRECTORY target uses mkdir; a FILE target uses create/modify/delete.
+- When multiple units share the same target_path, that single operation must implement the combined acceptance criteria and contract obligations of ALL units in that path group. One change DOES cover all units in the same-path group when its content satisfies their combined criteria.
+- Units with different target_path values are separate obligations and each requires its own planned operation at that exact path.
 - Never create duplicate changes for the same path.
-- Functional and non-functional requirements must be covered by all implementation units mapped to them; same-path units are implemented together as one file-change group.
-IMPLEMENTATION FILE GROUPS (one planned change per listed path):
+- Functional and non-functional requirements must be covered by all implementation units mapped to them; same-path units are implemented together as one operation group. Every explicit directory obligation must have its own mkdir operation unless that directory already exists.
+IMPLEMENTATION TARGET GROUPS (one operation per listed path):
 {implementation_file_groups_text}
 
+EXPLICIT DIRECTORY OBLIGATIONS (each requires a mkdir operation unless already present in the workspace):
+{directory_obligations_text}
+
 ARTIFACT CONTENT CONTRACT:
-- The file groups above repeat the exact acceptance obligations for each artifact. Treat every REQUIRED RESULT and UNIT ACCEPTANCE line as a mandatory content requirement.
+- The target groups above repeat the exact acceptance obligations for each artifact. Treat every REQUIRED RESULT and UNIT ACCEPTANCE line as a mandatory content requirement.
 - Do not return empty, skeletal, placeholder-only, or metadata-only content when the acceptance criteria require substantive configuration or documentation.
 - For configuration files, include the complete required sections, values, references, and cross-file consistency. For project metadata, enumerate each required item rather than merely asserting that it exists.
 - Before returning JSON, mentally audit every file's complete content against every acceptance line for that file. A path being present in changes does not mean its requirement is implemented.
@@ -247,6 +284,9 @@ ARTIFACT CONTENT CONTRACT:
 - If a constraint is explicitly mapped to implementation units, those units are mandatory and must be implemented.
 - Only contracts referenced by implementation units are implementation obligations. Unreferenced contracts are context/verification descriptions and must not create extra file changes.
 - Do not invent additional files or units to make coverage appear complete. If the ESpec has an inconsistency, explain it in risks rather than silently changing its scope.
+
+For an explicitly required directory, represent the operation as:
+{{"path": "frontend", "change_type": "mkdir", "reason": "Create required directory", "content": null}}
 
 Return one JSON object with this exact structure:
 {{
@@ -265,15 +305,14 @@ Return one JSON object with this exact structure:
 }}
 
 RULES:
-- Only propose workspace-relative file paths. Never use "." or a directory-only path as a FileChange path.
-- change_type must be create, modify, or delete.
+- Only propose workspace-relative paths. Never use ".". Use mkdir only for an explicitly required DIRECTORY target; content must be null. Create each parent directory before its child directory. Never use mkdir for a file.
 - Treat WORKSPACE FILE INVENTORY as the authoritative list of currently existing eligible workspace files.
 - If a proposed path appears in WORKSPACE FILE INVENTORY, use modify (or delete when removal is explicitly required); never use create for an existing path.
 - If a proposed path is absent from WORKSPACE FILE INVENTORY, use create only when it is genuinely a new file. Inventory may be bounded; if marked truncated, do not assume an absent path is missing. Request/inspect additional context rather than guessing.
 - Existing source files omitted from SOURCE FILES still exist; omission means their contents were not selected, not that they are absent.
 - Prefer modifying existing files over creating duplicate alternatives.
 - Create and modify operations require complete file content.
-- Delete operations must use content null.
+- Delete and mkdir operations must use content null. A mkdir operation creates exactly one directory; its parent must already exist or be created by an earlier mkdir change.
 - Do not propose the same path more than once.
 - Include complete content for every created or modified file.
 - Prefer simple, maintainable solutions.
@@ -302,17 +341,27 @@ RULES:
             if not isinstance(raw_changes, list) or not raw_changes:
                 raise ValueError("changes must be a non-empty list")
 
-            changes = tuple(
-                FileChange(
+            def parse_change(item):
+                change_type = ChangeType(item["change_type"])
+                raw_content = item.get("content")
+                if change_type in (ChangeType.DELETE, ChangeType.MKDIR):
+                    if raw_content is not None:
+                        raise ValueError(
+                            f"{change_type.value} operation for {item.get('path')!r} must use content null"
+                        )
+                    content = None
+                else:
+                    content = _normalize_model_file_content(
+                        item["path"], raw_content
+                    )
+                return FileChange(
                     path=item["path"],
-                    change_type=ChangeType(item["change_type"]),
+                    change_type=change_type,
                     reason=item["reason"],
-                    content=_normalize_model_file_content(
-                        item["path"], item.get("content")
-                    ),
+                    content=content,
                 )
-                for item in raw_changes
-            )
+
+            changes = tuple(parse_change(item) for item in raw_changes)
 
             raw_commands = response.get("verification_commands", [])
             if not isinstance(raw_commands, list):

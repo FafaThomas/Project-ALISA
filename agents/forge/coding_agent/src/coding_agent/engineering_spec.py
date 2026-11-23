@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
+import hashlib
 import json
 from pathlib import PurePosixPath
 from typing import Any, Mapping
@@ -58,6 +59,15 @@ def _unique(values: tuple[str, ...], field_name: str) -> None:
         raise ValueError(f"{field_name} must contain unique values")
 
 
+
+
+def make_acceptance_criterion_id(requirement_id: str, description: str) -> str:
+    """Build a deterministic criterion ID that survives reordering and insertion."""
+    normalized = " ".join(description.casefold().split())
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+    return f"{requirement_id}-AC-{digest}"
+
+
 def _workspace_path(value: str, field_name: str = "path") -> None:
     _nonempty(value, field_name)
     normalized = value.replace("\\", "/")
@@ -73,6 +83,7 @@ class Requirement:
     kind: RequirementKind = RequirementKind.FUNCTIONAL
     acceptance_criteria: tuple[str, ...] = ()
     priority: str = "normal"
+    acceptance_criterion_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _nonempty(self.requirement_id, "requirement_id")
@@ -81,6 +92,18 @@ class Requirement:
             raise ValueError("priority must be low, normal, high, or critical")
         if any(not item.strip() for item in self.acceptance_criteria):
             raise ValueError("acceptance criteria must not contain empty values")
+        ids = self.acceptance_criterion_ids or tuple(
+            make_acceptance_criterion_id(self.requirement_id, description)
+            for description in self.acceptance_criteria
+        )
+        if len(ids) != len(self.acceptance_criteria):
+            raise ValueError(
+                "acceptance_criterion_ids must have one ID for each acceptance criterion"
+            )
+        _unique(ids, "acceptance_criterion_ids")
+        for criterion_id in ids:
+            _nonempty(criterion_id, "acceptance criterion ID")
+        object.__setattr__(self, "acceptance_criterion_ids", tuple(ids))
 
 
 @dataclass(frozen=True)
@@ -141,12 +164,13 @@ class ImplementationUnit:
     satisfies: tuple[str, ...] = ()
     implements: tuple[str, ...] = ()
     acceptance_criteria: tuple[str, ...] = ()
+    implements_acceptance_criteria: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for name in ("unit_id", "title"):
             _nonempty(getattr(self, name), name)
         _workspace_path(self.target_path, "target_path")
-        for name in ("depends_on", "satisfies", "implements"):
+        for name in ("depends_on", "satisfies", "implements", "implements_acceptance_criteria"):
             _unique(getattr(self, name), name)
         if self.unit_id in self.depends_on:
             raise ValueError("an implementation unit cannot depend on itself")
@@ -160,6 +184,7 @@ class VerificationCriterion:
     required: bool = True
     command: tuple[str, ...] = ()
     covers: tuple[str, ...] = ()
+    covers_acceptance_criteria: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _nonempty(self.criterion_id, "criterion_id")
@@ -167,6 +192,7 @@ class VerificationCriterion:
         if self.command and any(not part for part in self.command):
             raise ValueError("verification command arguments must not be empty")
         _unique(self.covers, "covers")
+        _unique(self.covers_acceptance_criteria, "covers_acceptance_criteria")
         if self.kind == VerificationKind.MANUAL and self.command:
             raise ValueError("manual verification criteria cannot define a command")
 
@@ -229,10 +255,40 @@ class EngineeringSpecification:
                 missing = set(values) - known
                 if missing:
                     raise ValueError(f"unit {unit.unit_id!r} references unknown {label}: {sorted(missing)}")
+        acceptance_criterion_owner = {
+            criterion_id: requirement.requirement_id
+            for requirement in self.requirements
+            for criterion_id in requirement.acceptance_criterion_ids
+        }
+        if len(acceptance_criterion_owner) != sum(
+            len(requirement.acceptance_criterion_ids) for requirement in self.requirements
+        ):
+            raise ValueError("acceptance criterion IDs must be unique across requirements")
+        acceptance_criterion_ids = set(acceptance_criterion_owner)
+        for unit in self.implementation_units:
+            missing = set(unit.implements_acceptance_criteria) - set(acceptance_criterion_owner)
+            if missing:
+                raise ValueError(
+                    f"unit {unit.unit_id!r} implements unknown acceptance criteria: {sorted(missing)}"
+                )
+            unrelated = {
+                criterion_id for criterion_id in unit.implements_acceptance_criteria
+                if acceptance_criterion_owner[criterion_id] not in unit.satisfies
+            }
+            if unrelated:
+                raise ValueError(
+                    f"unit {unit.unit_id!r} maps acceptance criteria outside its satisfied requirements: "
+                    f"{sorted(unrelated)}"
+                )
         for criterion in self.verification:
             missing = set(criterion.covers) - (requirement_ids | unit_ids)
             if missing:
                 raise ValueError(f"verification {criterion.criterion_id!r} covers unknown items: {sorted(missing)}")
+            missing_acceptance = set(criterion.covers_acceptance_criteria) - acceptance_criterion_ids
+            if missing_acceptance:
+                raise ValueError(
+                    f"verification {criterion.criterion_id!r} covers unknown acceptance criteria: {sorted(missing_acceptance)}"
+                )
 
     @staticmethod
     def _assert_acyclic(graph: dict[str, tuple[str, ...]], label: str) -> None:

@@ -117,3 +117,54 @@ def test_assessment_flags_unexpected_workspace_contents(tmp_path):
     assert candidates[0].status == RecoveryStatus.CONFLICT
     assert "manual investigation" in candidates[0].assessment
     assert target.read_bytes() == unexpected
+
+
+def test_assessment_recognizes_interrupted_directory_creation(tmp_path):
+    from coding_agent.change_tracking import DIRECTORY_STATE_HASH
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "frontend").mkdir()
+    journal = ChangeJournal(tmp_path / "journal.jsonl")
+    journal.append(
+        change_id="mkdir-recovery",
+        event="apply_intent",
+        relative_path="frontend",
+        operation="mkdir",
+        state="approved",
+        original_hash=None,
+        resulting_hash=DIRECTORY_STATE_HASH,
+    )
+
+    candidate = assess_recovery(journal, Workspace(workspace_root))[0]
+    assert candidate.status == RecoveryStatus.APPLIED
+    assert candidate.operation == "mkdir"
+
+
+def test_recovery_can_finish_interrupted_empty_directory_rollback(tmp_path):
+    from coding_agent.change_tracking import DIRECTORY_STATE_HASH
+    from coding_agent.recovery import RecoveryAction, decide_recovery, execute_recovery
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "frontend").mkdir()
+    journal = ChangeJournal(tmp_path / "journal.jsonl")
+    for event, state in (("apply_intent", "approved"), ("applied", "applied"), ("rollback_intent", "applied")):
+        journal.append(
+            change_id="mkdir-rollback-recovery",
+            event=event,
+            relative_path="frontend",
+            operation="mkdir",
+            state=state,
+            original_hash=None,
+            resulting_hash=DIRECTORY_STATE_HASH,
+        )
+
+    workspace = Workspace(workspace_root)
+    candidate = assess_recovery(journal, workspace)[0]
+    decision = decide_recovery(candidate)
+    assert decision.action == RecoveryAction.RESTORE_ORIGINAL
+
+    result = execute_recovery(candidate, decision, journal, workspace)
+    assert result.executed and result.journaled
+    assert not (workspace_root / "frontend").exists()

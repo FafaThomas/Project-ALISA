@@ -164,6 +164,9 @@ def _display_plan(plan, workspace: Workspace) -> None:
     for index, change in enumerate(plan.changes, start=1):
         print(f"\n[{index}] {change.change_type.value.upper()} {change.path}")
         print(f"Reason: {change.reason}")
+        if change.change_type.value == "mkdir":
+            print("(Create directory; no file-content diff.)")
+            continue
         try:
             if change.change_type.value == "create":
                 before = ""

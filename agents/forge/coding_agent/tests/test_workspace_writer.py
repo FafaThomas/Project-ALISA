@@ -431,3 +431,78 @@ def test_failed_nested_create_cleans_up_file_and_new_directories(tmp_path, monke
         writer.apply(record, proposal)
 
     assert not (tmp_path / "src").exists()
+
+
+def test_mkdir_creates_exactly_one_directory_and_rolls_back_when_empty(tmp_path):
+    from coding_agent.change_tracking import DIRECTORY_STATE_HASH
+
+    workspace = Workspace(tmp_path)
+    writer = WorkspaceWriter(workspace)
+    proposal = FileChange(
+        path="frontend",
+        change_type=ChangeType.MKDIR,
+        reason="Create required frontend directory",
+    )
+    record = WorkspaceChange(
+        change_id="mkdir-001",
+        relative_path="frontend",
+        operation="mkdir",
+        state=ChangeState.APPROVED,
+        original_hash=None,
+        resulting_hash=DIRECTORY_STATE_HASH,
+        reason="Create required frontend directory",
+    )
+
+    applied = writer.apply(record, proposal)
+    assert applied.applied
+    assert (tmp_path / "frontend").is_dir()
+    assert applied.recovery.operation == "mkdir"
+
+    rolled_back = writer.rollback(applied.recovery)
+    assert rolled_back.applied
+    assert not (tmp_path / "frontend").exists()
+
+
+def test_mkdir_refuses_to_create_missing_parent_implicitly(tmp_path):
+    from coding_agent.change_tracking import DIRECTORY_STATE_HASH
+
+    workspace = Workspace(tmp_path)
+    writer = WorkspaceWriter(workspace)
+    proposal = FileChange(
+        path="frontend/src",
+        change_type=ChangeType.MKDIR,
+        reason="Create nested directory",
+    )
+    record = WorkspaceChange(
+        change_id="mkdir-002",
+        relative_path="frontend/src",
+        operation="mkdir",
+        state=ChangeState.APPROVED,
+        original_hash=None,
+        resulting_hash=DIRECTORY_STATE_HASH,
+        reason="Create nested directory",
+    )
+
+    with pytest.raises(WorkspaceWriteError, match="parent must already exist"):
+        writer.apply(record, proposal)
+    assert not (tmp_path / "frontend").exists()
+
+
+def test_mkdir_rollback_refuses_nonempty_directory(tmp_path):
+    from coding_agent.change_tracking import DIRECTORY_STATE_HASH
+
+    target = tmp_path / "frontend"
+    target.mkdir()
+    (target / "keep.txt").write_text("keep", encoding="utf-8")
+    writer = WorkspaceWriter(Workspace(tmp_path))
+    recovery = RecoveryRecord(
+        change_id="mkdir-003",
+        relative_path="frontend",
+        operation="mkdir",
+        original_bytes=None,
+        resulting_hash=DIRECTORY_STATE_HASH,
+    )
+
+    with pytest.raises(WorkspaceWriteError, match="Rollback failed"):
+        writer.rollback(recovery)
+    assert (target / "keep.txt").read_text(encoding="utf-8") == "keep"

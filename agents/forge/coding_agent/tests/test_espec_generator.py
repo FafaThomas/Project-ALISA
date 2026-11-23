@@ -202,7 +202,14 @@ def test_verification_coverage_supports_direct_and_indirect_requirement_mapping(
         "target_path": "tests/task_validation.py", "kind": "test",
         "depends_on": [], "satisfies": ["REQ-001"],
         "implements": [], "acceptance_criteria": ["Reject invalid task input"],
+        "implements_acceptance_criteria": [],
     })
+    from coding_agent.engineering_spec import make_acceptance_criterion_id
+    payload["implementation_units"][0]["implements_acceptance_criteria"] = [
+        make_acceptance_criterion_id(
+            "REQ-001", "A submitted task appears in the list"
+        )
+    ]
     payload["verification"][0]["covers"] = ["UNIT-002"]
     client = FakeClient(responses()[:3] + [payload])
 
@@ -371,6 +378,8 @@ def test_integration_accepts_verification_id_alias():
 
 
 def _multi_requirement_payloads():
+    from coding_agent.engineering_spec import make_acceptance_criterion_id
+
     requirements = {"requirements": [
         {"requirement_id": "REQ-001", "description": "Create root, frontend, and backend .dockerignore files.",
          "kind": "functional", "acceptance_criteria": [
@@ -389,16 +398,23 @@ def _multi_requirement_payloads():
         "contract_id": "CON-001", "owner": "MOD-001", "name": "RepositoryLayout", "kind": "data",
         "inputs": [], "outputs": [], "invariants": []
     }]}
+    criterion_ids = [
+        make_acceptance_criterion_id("REQ-001", item)
+        for item in requirements["requirements"][0]["acceptance_criteria"]
+    ]
     units = [
         {"unit_id": "UNIT-001", "title": "Root ignore rules", "target_path": ".dockerignore",
          "kind": "configuration", "depends_on": [], "satisfies": ["REQ-001"],
-         "implements": [], "acceptance_criteria": ["Root ignore file exists"]},
+         "implements": [], "acceptance_criteria": ["Root ignore file exists"],
+         "implements_acceptance_criteria": [criterion_ids[0]]},
         {"unit_id": "UNIT-002", "title": "Frontend ignore rules", "target_path": "frontend/.dockerignore",
          "kind": "configuration", "depends_on": [], "satisfies": ["REQ-001"],
-         "implements": [], "acceptance_criteria": ["Frontend ignore file exists"]},
+         "implements": [], "acceptance_criteria": ["Frontend ignore file exists"],
+         "implements_acceptance_criteria": [criterion_ids[1]]},
         {"unit_id": "UNIT-003", "title": "Backend ignore rules", "target_path": "backend/.dockerignore",
          "kind": "configuration", "depends_on": [], "satisfies": ["REQ-001"],
-         "implements": [], "acceptance_criteria": ["Backend ignore file exists"]},
+         "implements": [], "acceptance_criteria": ["Backend ignore file exists"],
+         "implements_acceptance_criteria": [criterion_ids[2]]},
     ]
     verification = {"verification": [{
         "criterion_id": "VER-001", "description": "Verify all ignore files and ensure no unrelated features exist",
@@ -447,35 +463,27 @@ def test_architecture_auto_adds_explicit_root_file_to_root_module(tmp_path):
     }]
 
 
-def test_service_appropriate_dockerignore_paths_use_directories_from_other_requirements():
+def test_service_appropriate_dockerignore_paths_are_not_inferred_from_other_requirements():
     from coding_agent.engineering_spec import Requirement, RequirementKind
 
     requirements = [
         Requirement(
-            requirement_id="REQ-001",
-            description="Establish separate frontend/, backend/, and postgres/ areas.",
-            kind=RequirementKind.FUNCTIONAL,
-            acceptance_criteria=(),
-            priority="high",
+            "REQ-001", "Establish separate frontend/, backend/, and postgres/ areas.",
+            RequirementKind.FUNCTIONAL,
         ),
         Requirement(
-            requirement_id="REQ-006",
-            description="Add root and service-appropriate .dockerignore files.",
-            kind=RequirementKind.FUNCTIONAL,
-            acceptance_criteria=(
+            "REQ-006", "Add root and service-appropriate .dockerignore files.",
+            RequirementKind.FUNCTIONAL,
+            (
                 "Root directory contains a .dockerignore file.",
-                "Each service directory contains a .dockerignore file.",
+                "Additional service .dockerignore files should be created as needed.",
             ),
-            priority="normal",
         ),
     ]
 
     required = EngineeringSpecificationGenerator._required_architecture_paths(requirements)
 
-    assert required[".dockerignore"] == {"REQ-006"}
-    assert required["frontend/.dockerignore"] == {"REQ-006"}
-    assert required["backend/.dockerignore"] == {"REQ-006"}
-    assert required["postgres/.dockerignore"] == {"REQ-006"}
+    assert required == {".dockerignore": {"REQ-006"}}
 
 
 def test_architecture_path_repair_refuses_ambiguous_root_module():
@@ -837,7 +845,6 @@ def test_integration_completion_repairs_file_mappings_and_adds_missing_service_u
     generator = EngineeringSpecificationGenerator(FakeClient([]), diagnostics_dir=tmp_path)
     generator._known_module_ids = {module.module_id for module in architecture}
     units_raw = [
-        ("UNIT-001", "Create root directory layout", ".", "REQ-002"),
         ("UNIT-002", "Compose", "docker-compose.yml", "REQ-003"),
         ("UNIT-003", "Environment example", ".env.example", "REQ-003"),
         ("UNIT-004", "Ignore rules", ".dockerignore", "REQ-003"),
@@ -876,7 +883,7 @@ def test_integration_completion_repairs_file_mappings_and_adds_missing_service_u
         "frontend/.dockerignore", "backend/.dockerignore", "postgres/.dockerignore"
     }.issubset(by_path)
     for path in ("frontend/.dockerignore", "backend/.dockerignore", "postgres/.dockerignore"):
-        assert set(by_path[path].satisfies) == {"REQ-007", "REQ-002"}
+        assert set(by_path[path].satisfies) == {"REQ-007"}
         assert by_path[path].kind.value == "configuration"
 
     # The false REQ-006 reference is removed from the Compose criterion.
@@ -1157,109 +1164,91 @@ def test_bare_filename_requirement_is_merged_into_existing_shared_file_unit():
     )
 
 
-def test_directory_requirement_maps_to_child_artifact_units_for_every_directory():
+def test_directory_requirement_is_not_mapped_to_incidental_child_file_units():
     requirements = [
         Requirement(
-            requirement_id="REQ-001",
-            description="Establish a clean root layout with separate frontend/, backend/, and postgres/ areas.",
+            "REQ-001",
+            "Establish a clean root layout with separate frontend/, backend/, and postgres/ areas.",
             kind=RequirementKind.FUNCTIONAL,
             acceptance_criteria=(
                 "Directories frontend/, backend/, and postgres/ exist in the root of the workspace.",
             ),
         ),
         Requirement(
-            requirement_id="REQ-006",
-            description="Add root and service-appropriate .dockerignore files.",
+            "REQ-006",
+            "Add root and service-appropriate .dockerignore files.",
             kind=RequirementKind.FUNCTIONAL,
-            acceptance_criteria=(
-                ".dockerignore files exist in the root, frontend/, backend/, and postgres/ directories.",
-            ),
+            acceptance_criteria=("A root .dockerignore file exists.",),
         ),
     ]
-    paths = {
-        ".dockerignore",
-        "frontend/.dockerignore",
-        "backend/.dockerignore",
-        "postgres/.dockerignore",
-    }
-    existing = [
+    units = [
         ImplementationUnit(
             unit_id=f"UNIT-{index:03d}",
             title=f"Create {path}",
             target_path=path,
             kind="configuration",
-            satisfies=("REQ-006",),
+            satisfies=("REQ-006", "REQ-001"),
             acceptance_criteria=(f"{path} exists.",),
         )
-        for index, path in enumerate(sorted(paths), start=1)
+        for index, path in enumerate(
+            (".dockerignore", "frontend/.dockerignore", "backend/.dockerignore"),
+            start=1,
+        )
     ]
 
-    units, repairs = EngineeringSpecificationGenerator._complete_required_file_units(
-        existing, requirements, paths
+    normalized, repairs = EngineeringSpecificationGenerator._normalize_requirement_file_mappings(
+        units, requirements, {unit.target_path for unit in units}
     )
 
-    for directory in ("frontend", "backend", "postgres"):
-        child = next(unit for unit in units if unit.target_path == f"{directory}/.dockerignore")
-        assert "REQ-001" in child.satisfies
-        assert f"Directory {directory}/ exists in the workspace." in child.acceptance_criteria
-
+    assert all("REQ-001" not in unit.satisfies for unit in normalized)
     assert sum(
-        item["action"] == "map_directory_requirement_to_child_unit"
-        and item["requirement_id"] == "REQ-001"
+        item["action"] == "remove_directory_requirement_from_file_unit"
         for item in repairs
     ) == 3
 
 
-def test_directory_coverage_validator_requires_a_unit_beneath_each_named_directory():
+def test_directory_coverage_validator_requires_structural_verification_not_child_files():
     from coding_agent.engineering_spec import VerificationCriterion, VerificationKind
 
     requirement = Requirement(
-        requirement_id="REQ-001",
-        description="Establish separate frontend/, backend/, and postgres/ directories.",
+        "REQ-001",
+        "Establish separate frontend/, backend/, and postgres/ directories.",
         kind=RequirementKind.FUNCTIONAL,
         acceptance_criteria=("Directories frontend/, backend/, and postgres/ exist.",),
     )
-    units = [
+    incidental_units = [
         ImplementationUnit(
-            unit_id="UNIT-001",
-            title="Create frontend ignore file",
-            target_path="frontend/.dockerignore",
-            kind="configuration",
-            satisfies=("REQ-001",),
+            "UNIT-001", "Create frontend ignore file", "frontend/.dockerignore",
+            kind="configuration", satisfies=("REQ-001",),
         ),
         ImplementationUnit(
-            unit_id="UNIT-002",
-            title="Create backend ignore file",
-            target_path="backend/.dockerignore",
-            kind="configuration",
-            satisfies=("REQ-001",),
+            "UNIT-002", "Create backend ignore file", "backend/.dockerignore",
+            kind="configuration", satisfies=("REQ-001",),
         ),
     ]
-    verification = [
+    manual_verification = [
         VerificationCriterion(
-            criterion_id="VER-001",
-            description="Manually verify all required directories exist.",
-            kind=VerificationKind.MANUAL,
-            covers=("REQ-001",),
+            "VER-001", "Manually verify all required directories exist.",
+            VerificationKind.MANUAL, covers=("REQ-001",),
         )
     ]
 
-    try:
+    with __import__("pytest").raises(ValueError, match="structural verification coverage"):
         EngineeringSpecificationGenerator._validate_integration_coverage(
-            units,
-            verification,
-            [requirement],
-            architecture_paths={
-                "frontend/.dockerignore",
-                "backend/.dockerignore",
-                "postgres/.dockerignore",
-            },
+            incidental_units, manual_verification, [requirement],
+            architecture_paths={"frontend/.dockerignore", "backend/.dockerignore"},
         )
-    except ValueError as exc:
-        assert "directory requirements lack implementation units beneath every required directory" in str(exc)
-        assert "REQ-001: postgres/" in str(exc)
-    else:
-        raise AssertionError("every explicitly required directory must have implementation coverage")
+
+    structural_verification = [
+        VerificationCriterion(
+            "VER-002", "Verify the frontend, backend, and postgres directories exist.",
+            VerificationKind.STRUCTURAL, covers=("REQ-001",),
+        )
+    ]
+    EngineeringSpecificationGenerator._validate_integration_coverage(
+        incidental_units, structural_verification, [requirement],
+        architecture_paths={"frontend/.dockerignore", "backend/.dockerignore"},
+    )
 
 
 def test_generic_root_directory_file_check_does_not_claim_directory_layout_coverage():
@@ -1292,10 +1281,11 @@ def test_generic_root_directory_file_check_does_not_claim_directory_layout_cover
         and "REQ-001" in item["removed_requirement_ids"]
         for item in repairs
     )
-    assert any(
-        item.kind == VerificationKind.MANUAL and item.covers == ("REQ-001",)
-        for item in repaired
+    structural = next(
+        item for item in repaired
+        if item.kind == VerificationKind.STRUCTURAL and item.covers == ("REQ-001",)
     )
+    assert structural.command[:2] == ("python", "-c")
 
 
 def test_bare_filename_is_not_mapped_when_architecture_context_is_ambiguous():
@@ -1327,25 +1317,29 @@ def test_bare_filename_is_not_mapped_when_architecture_context_is_ambiguous():
     assert "REQ-003" not in mapping["docker-compose.yml"]
 
 
-def test_integration_normalizes_root_verification_and_shared_path_units(tmp_path):
+def test_integration_normalizes_directory_requirements_without_file_side_effect_mappings():
     from coding_agent.engineering_spec import (
-        ArchitectureModule, InterfaceContract, Requirement, RequirementKind,
+        ArchitectureModule, Requirement, RequirementKind, VerificationKind,
     )
 
     requirements = [
-        Requirement("REQ-001", "Establish frontend/, backend/, and postgres/ directories."),
-        Requirement("REQ-002", "Create the root docker-compose.yml with all required services."),
-        Requirement("REQ-003", "Configure PostgreSQL in docker-compose.yml with credentials, volume, and health check."),
-        Requirement("REQ-004", "Configure service startup dependencies using health conditions."),
-        Requirement("REQ-010", "Verify Compose syntax if Docker is available; otherwise report unavailability.",
-                    kind=RequirementKind.CONSTRAINT),
-        Requirement("REQ-011", "Ensure no unrelated application features are introduced.",
-                    kind=RequirementKind.CONSTRAINT),
+        Requirement(
+            "REQ-001",
+            "Establish frontend/, backend/, and postgres/ directories.",
+            RequirementKind.FUNCTIONAL,
+            ("Directories frontend/, backend/, and postgres/ exist.",),
+        ),
+        Requirement(
+            "REQ-002",
+            "Create root docker-compose.yml with frontend, backend, and PostgreSQL services.",
+            RequirementKind.FUNCTIONAL,
+            ("docker-compose.yml defines all three services.",),
+        ),
     ]
     architecture = [
         ArchitectureModule(
             "MOD-ROOT", "Root", "Root configuration",
-            file_paths=("docker-compose.yml", ".dockerignore"),
+            file_paths=("docker-compose.yml",),
         ),
         ArchitectureModule(
             "MOD-FE", "Frontend", "Frontend files",
@@ -1355,149 +1349,40 @@ def test_integration_normalizes_root_verification_and_shared_path_units(tmp_path
             "MOD-BE", "Backend", "Backend files",
             file_paths=("backend/.dockerignore",),
         ),
-        ArchitectureModule(
-            "MOD-DB", "Postgres", "Postgres files",
-            file_paths=("postgres/.dockerignore",),
-        ),
     ]
-    contracts = [
-        InterfaceContract("CON-INSPECT", "MOD-ROOT", "InspectWorkspace", "function"),
-        InterfaceContract("CON-LAYOUT", "MOD-ROOT", "CreateRootLayout", "function"),
-        InterfaceContract("CON-COMPOSE", "MOD-ROOT", "CreateCompose", "function"),
-        InterfaceContract("CON-PG", "MOD-ROOT", "ConfigurePostgres", "function"),
-        InterfaceContract("CON-DEPS", "MOD-ROOT", "ConfigureDependencies", "function"),
-        InterfaceContract("CON-VERIFY", "MOD-ROOT", "VerifyComposeSyntax", "function"),
-        InterfaceContract("CON-SCOPE", "MOD-ROOT", "EnsureNoUnrelatedFeatures", "function"),
-    ]
-    generator = EngineeringSpecificationGenerator(FakeClient([]), diagnostics_dir=tmp_path)
-    generator._known_module_ids = {module.module_id for module in architecture}
+    generator = EngineeringSpecificationGenerator(FakeClient([]))
     integration = {
-        "implementation_units": [
-            {
-                "unit_id": "UNIT-001", "title": "Inspect Workspace and Create Root Layout",
-                "target_path": ".", "kind": "configuration", "depends_on": [],
-                "satisfies": ["REQ-001"], "implements": ["CON-INSPECT", "CON-LAYOUT"],
-                "acceptance_criteria": [
-                    "The workspace is inspected.",
-                    "Directories frontend/, backend/, and postgres/ exist.",
-                ],
-            },
-            {
-                "unit_id": "UNIT-002", "title": "Create Compose",
-                "target_path": "docker-compose.yml", "kind": "configuration",
-                "depends_on": ["UNIT-001"], "satisfies": ["REQ-002"],
-                "implements": ["CON-COMPOSE"],
-                "acceptance_criteria": ["Define frontend, backend, and postgres services."],
-            },
-            {
-                "unit_id": "UNIT-003", "title": "Configure PostgreSQL",
-                "target_path": "docker-compose.yml", "kind": "configuration",
-                "depends_on": ["UNIT-002"], "satisfies": ["REQ-002"],
-                "implements": ["CON-PG"],
-                "acceptance_criteria": ["Configure PostgreSQL credentials, volume, and health check."],
-            },
-            {
-                "unit_id": "UNIT-004", "title": "Configure Service Dependencies",
-                "target_path": "docker-compose.yml", "kind": "configuration",
-                "depends_on": ["UNIT-003"], "satisfies": ["REQ-002"],
-                "implements": ["CON-DEPS"],
-                "acceptance_criteria": ["Use health-conditioned startup dependencies."],
-            },
-            {
-                "unit_id": "UNIT-005", "title": "Verify Docker Compose Syntax",
-                "target_path": "docker-compose.yml", "kind": "configuration",
-                "depends_on": ["UNIT-002"], "satisfies": ["REQ-002"],
-                "implements": ["CON-VERIFY"],
-                "acceptance_criteria": ["If Docker is available, verify Compose syntax."],
-            },
-            {
-                "unit_id": "UNIT-006", "title": "Ensure No Unrelated Features",
-                "target_path": ".", "kind": "configuration",
-                "depends_on": ["UNIT-001"], "satisfies": ["REQ-002"],
-                "implements": ["CON-SCOPE"],
-                "acceptance_criteria": ["No unrelated application features are introduced."],
-            },
-            *[
-                {
-                    "unit_id": f"UNIT-{index:03d}",
-                    "title": f"Create {directory} ignore file",
-                    "target_path": f"{directory}/.dockerignore",
-                    "kind": "configuration", "depends_on": ["UNIT-001"],
-                    "satisfies": ["REQ-001"],
-                    "implements": [],
-                    "acceptance_criteria": [f"Directory {directory}/ exists."],
-                }
-                for index, directory in enumerate(("backend", "frontend", "postgres"), start=7)
-            ],
-            {
-                "unit_id": "UNIT-010", "title": "Create root ignore file",
-                "target_path": ".dockerignore", "kind": "configuration",
-                "depends_on": ["UNIT-001"], "satisfies": ["REQ-001"],
-                "implements": [], "acceptance_criteria": ["Root .dockerignore exists."],
-            },
-        ],
-        "verification": [
-            {
-                "criterion_id": "VER-001",
-                "description": "Verify workspace layout.",
-                "kind": "manual", "required": True, "command": [],
-                "covers": ["REQ-001"],
-            },
-            {
-                "criterion_id": "VER-002",
-                "description": "Verify PostgreSQL Compose configuration and readiness.",
-                "kind": "manual", "required": True, "command": [],
-                "covers": ["REQ-003"],
-            },
-        ],
+        "implementation_units": [{
+            "unit_id": "UNIT-001",
+            "title": "Create Compose configuration",
+            "target_path": "docker-compose.yml",
+            "kind": "configuration",
+            "depends_on": [],
+            "satisfies": ["REQ-002", "REQ-001"],
+            "implements": [],
+            "acceptance_criteria": ["Define the required services."],
+        }],
+        "verification": [{
+            "criterion_id": "VER-001",
+            "description": "Verify frontend, backend, and postgres directories exist.",
+            "kind": "structural",
+            "required": True,
+            "command": ["python", "-c", "from pathlib import Path; assert all(Path(p).is_dir() for p in ('frontend','backend','postgres'))"],
+            "covers": ["REQ-001"],
+        }],
     }
 
     units, verification = generator._parse_integration(
-        integration, requirements, architecture, contracts
+        integration, requirements, architecture, contracts=[]
     )
 
-    assert len(units) == 5
-    by_path = {unit.target_path: unit for unit in units}
-    assert set(by_path) == {
-        "docker-compose.yml", "backend/.dockerignore",
-        "frontend/.dockerignore", "postgres/.dockerignore",
-        ".dockerignore",
-    }
-    compose = by_path["docker-compose.yml"]
-    assert set(compose.satisfies) == {"REQ-002", "REQ-003", "REQ-004"}
-    assert set(compose.implements) == {"CON-COMPOSE", "CON-PG", "CON-DEPS"}
-    assert len(compose.acceptance_criteria) == 3
-    assert all(unit.target_path != "." for unit in units)
-    assert all("UNIT-001" not in unit.depends_on for unit in units)
-    assert set(by_path["backend/.dockerignore"].satisfies) == {"REQ-001"}
-    assert set(by_path["frontend/.dockerignore"].satisfies) == {"REQ-001"}
-    assert set(by_path["postgres/.dockerignore"].satisfies) == {"REQ-001"}
-    assert all(
-        "CON-LAYOUT" in by_path[path].implements
-        for path in (
-            ".dockerignore", "backend/.dockerignore",
-            "frontend/.dockerignore", "postgres/.dockerignore",
-        )
+    assert len(units) == 1
+    assert units[0].satisfies == ("REQ-002",)
+    directory_check = next(
+        item for item in verification if item.covers == ("REQ-001",)
     )
-    assert "CON-INSPECT" not in {
-        contract_id for unit in units for contract_id in unit.implements
-    }
-
-    verification_by_covers = {
-        reference: criterion
-        for criterion in verification
-        for reference in criterion.covers
-        if reference.startswith("REQ-")
-    }
-    assert "REQ-010" in verification_by_covers
-    assert "REQ-011" in verification_by_covers
-    assert any(
-        item["action"] == "merge_same_target_path_units"
-        and item["target_path"] == "docker-compose.yml"
-        for item in json.loads(
-            (tmp_path / "integration_completion_repairs.json").read_text()
-        )["implementation_units"]
-    )
+    assert directory_check.kind == VerificationKind.STRUCTURAL
+    assert "UNIT-001" not in directory_check.covers
 
 
 def test_constraint_file_reference_does_not_become_an_implementation_path():
@@ -1589,14 +1474,11 @@ def test_explicit_add_tests_requirement_is_normalized_to_functional():
 def test_reporting_phrase_commands_results_does_not_invent_commands_directory():
     requirements = [
         Requirement("REQ-LAYOUT", "Establish frontend/, backend/, and postgres/ areas."),
-        Requirement("REQ-IGNORE", "Add root and service-appropriate .dockerignore files."),
+        Requirement("REQ-IGNORE", "Add root and service-appropriate .dockerignore files as needed."),
         Requirement("REQ-REPORT", "Report exact verification commands/results at the end."),
     ]
     paths = EngineeringSpecificationGenerator._required_architecture_paths(requirements)
-    assert "frontend/.dockerignore" in paths
-    assert "backend/.dockerignore" in paths
-    assert "postgres/.dockerignore" in paths
-    assert "commands/.dockerignore" not in paths
+    assert paths == {".dockerignore": {"REQ-IGNORE"}}
 
 
 def test_architecture_requires_test_artifact_path_for_explicit_test_requirement():
@@ -1851,6 +1733,13 @@ def test_integration_normalizer_attaches_overlapping_requirements_to_existing_fi
             file_paths=("postgres/.dockerignore",),
         ),
     ]
+    from coding_agent.engineering_spec import make_acceptance_criterion_id
+    ignore_criterion_id = make_acceptance_criterion_id(
+        "REQ-007", requirements[4].acceptance_criteria[0]
+    )
+    repository_criterion_id = make_acceptance_criterion_id(
+        "REQ-014", requirements[7].acceptance_criteria[0]
+    )
     data = {
         "implementation_units": [
             {
@@ -1871,6 +1760,7 @@ def test_integration_normalizer_attaches_overlapping_requirements_to_existing_fi
                     "target_path": path, "kind": "configuration",
                     "depends_on": [], "satisfies": ["REQ-007"],
                     "implements": [], "acceptance_criteria": ["Add appropriate ignore rules."],
+                    "implements_acceptance_criteria": [ignore_criterion_id],
                 }
                 for index, path in enumerate(
                     (".dockerignore", "frontend/.dockerignore",
@@ -1905,3 +1795,87 @@ def test_integration_normalizer_attaches_overlapping_requirements_to_existing_fi
         "postgres/.dockerignore",
     ):
         assert "REQ-014" in by_path[path]
+
+
+def test_fafas_work_package_one_directory_and_conditional_ignore_requirements_are_separate():
+    from coding_agent.engineering_spec import Requirement, RequirementKind
+
+    requirements = [
+        Requirement(
+            "REQ-001",
+            "Establish a clean root layout with separate frontend/, backend/, and postgres/ areas.",
+            RequirementKind.FUNCTIONAL,
+            ("The workspace should contain directories named 'frontend', 'backend', and 'postgres'.",),
+        ),
+        Requirement(
+            "REQ-006",
+            "Add root and service-appropriate .dockerignore files.",
+            RequirementKind.FUNCTIONAL,
+            (
+                "A .dockerignore file should be created at the root.",
+                "Additional .dockerignore files should be created in the 'frontend' and 'backend' directories as needed.",
+            ),
+        ),
+    ]
+
+    generator = EngineeringSpecificationGenerator(FakeClient([]))
+    assert generator._is_directory_only_requirement(requirements[0])
+    assert not generator._is_directory_only_requirement(requirements[1])
+    assert generator._required_architecture_paths(requirements) == {
+        ".dockerignore": {"REQ-006"},
+    }
+
+    architecture = generator._parse_architecture({"architecture": [
+        {
+            "module_id": "MOD-ROOT", "name": "Repository",
+            "responsibility": "Root configuration", "depends_on": [],
+            "file_paths": [".dockerignore", "frontend/.dockerignore", "backend/.dockerignore", "postgres/.dockerignore"],
+        },
+    ]}, requirements)
+    paths = {path for module in architecture for path in module.file_paths}
+    assert paths == {".dockerignore"}
+
+
+def test_directory_only_task_can_have_no_file_implementation_units():
+    from coding_agent.engineering_spec import Requirement, RequirementKind, VerificationKind
+
+    requirement = Requirement(
+        "REQ-DIR", "Establish frontend/, backend/, and postgres/ directories.",
+        RequirementKind.FUNCTIONAL,
+        ("The frontend, backend, and postgres directories exist.",),
+    )
+    generator = EngineeringSpecificationGenerator(FakeClient([]))
+
+    units, verification = generator._parse_integration({
+        "implementation_units": [],
+        "verification": [{
+            "criterion_id": "VER-DIR",
+            "description": "Verify frontend, backend, and postgres directories exist.",
+            "kind": "structural",
+            "required": True,
+            "command": [
+                "python", "-c",
+                "from pathlib import Path; import sys; paths=['frontend','backend','postgres']; sys.exit(any(not Path(p).is_dir() for p in paths))",
+            ],
+            "covers": ["REQ-DIR"],
+        }],
+    }, [requirement], architecture=[], contracts=[])
+
+    assert units == []
+    assert verification[0].kind == VerificationKind.STRUCTURAL
+    assert verification[0].covers == ("REQ-DIR",)
+
+
+def test_generated_spec_has_stable_criterion_ids_and_explicit_implementation_and_verification_coverage():
+    spec = EngineeringSpecificationGenerator(FakeClient(responses())).generate(
+        task_id="task-criterion", objective="Build task dashboard", workspace="/workspace"
+    )
+
+    requirement = spec.requirements[0]
+    criterion_id = requirement.acceptance_criterion_ids[0]
+    assert criterion_id.startswith("REQ-001-AC-")
+    assert criterion_id in spec.implementation_units[0].implements_acceptance_criteria
+    assert any(
+        criterion_id in item.covers_acceptance_criteria and item.required
+        for item in spec.verification
+    )

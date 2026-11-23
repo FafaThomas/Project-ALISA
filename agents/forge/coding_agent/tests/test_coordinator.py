@@ -142,3 +142,33 @@ def test_failed_verification_can_be_rolled_back(tmp_path):
 
     assert result.change.state == ChangeState.ROLLED_BACK
     assert target.read_bytes() == original
+
+
+def test_coordinator_applies_verifies_and_rolls_back_directory(tmp_path):
+    from coding_agent.change_tracking import DIRECTORY_STATE_HASH
+    from coding_agent.coordinator import CoordinatedChange
+    from coding_agent.workspace_writer import RecoveryRecord
+
+    coordinator = ChangeCoordinator(Workspace(tmp_path))
+    proposal = FileChange(
+        path="backend",
+        change_type=ChangeType.MKDIR,
+        reason="Create backend directory",
+    )
+    change = WorkspaceChange(
+        change_id="coordinator-mkdir",
+        relative_path="backend",
+        operation="mkdir",
+        state=ChangeState.APPROVED,
+        original_hash=None,
+        resulting_hash=DIRECTORY_STATE_HASH,
+        reason="Create backend directory",
+    )
+
+    applied = coordinator.apply(change, proposal)
+    assert applied.change.state == ChangeState.APPLIED
+    verified = coordinator.verify(applied)
+    assert verified.change.state == ChangeState.VERIFIED
+    rolled_back = coordinator.rollback(verified)
+    assert rolled_back.change.state == ChangeState.ROLLED_BACK
+    assert not (tmp_path / "backend").exists()

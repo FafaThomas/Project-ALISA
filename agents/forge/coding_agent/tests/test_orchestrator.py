@@ -1256,3 +1256,51 @@ def test_manual_verification_handler_records_human_evidence_and_completes(tmp_pa
     assert result.status == TaskStatus.COMPLETED, result.errors
     assert len(seen) == 1
     assert result.specification_report["criteria"][0]["human_evidence"].startswith("Inspected config.txt")
+
+
+def test_orchestrator_applies_parent_and_child_directory_operations_in_order(tmp_path):
+    task = make_task(tmp_path)
+    plan = make_plan(task, changes=[
+        FileChange("frontend", ChangeType.MKDIR, "Create frontend directory"),
+        FileChange("frontend/src", ChangeType.MKDIR, "Create frontend source directory"),
+        FileChange("frontend/src/app.py", ChangeType.CREATE, "Create app module", "VALUE = 1\n"),
+    ], commands=[])
+    orchestrator, _, _, _ = make_orchestrator(tmp_path, plan)
+
+    result = orchestrator.run(task, approval_handler=lambda proposed: True)
+
+    assert result.status == TaskStatus.COMPLETED, result.errors
+    assert (tmp_path / "frontend").is_dir()
+    assert (tmp_path / "frontend/src").is_dir()
+    assert (tmp_path / "frontend/src/app.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert result.changed_files == ("frontend", "frontend/src", "frontend/src/app.py")
+
+
+def test_orchestrator_rejects_child_directory_before_parent(tmp_path):
+    task = make_task(tmp_path)
+    plan = make_plan(task, changes=[
+        FileChange("frontend/src", ChangeType.MKDIR, "Create nested source directory"),
+        FileChange("frontend", ChangeType.MKDIR, "Create frontend directory"),
+    ], commands=[])
+    orchestrator, _, _, runner = make_orchestrator(tmp_path, plan)
+
+    result = orchestrator.run(task, approval_handler=lambda proposed: True)
+
+    assert result.status == TaskStatus.FAILED
+    assert any("add a parent mkdir operation before" in error for error in result.errors)
+    assert not (tmp_path / "frontend").exists()
+    assert runner.calls == []
+
+
+def test_orchestrator_does_not_create_directories_without_approval(tmp_path):
+    task = make_task(tmp_path)
+    plan = make_plan(task, changes=[
+        FileChange("backend", ChangeType.MKDIR, "Create backend directory"),
+    ], commands=[])
+    orchestrator, _, _, runner = make_orchestrator(tmp_path, plan)
+
+    result = orchestrator.run(task, approval_handler=lambda proposed: False)
+
+    assert result.status == TaskStatus.BLOCKED
+    assert not (tmp_path / "backend").exists()
+    assert runner.calls == []

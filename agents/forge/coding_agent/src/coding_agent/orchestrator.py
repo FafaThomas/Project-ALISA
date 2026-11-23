@@ -15,6 +15,7 @@ from coding_agent.change_tracking import (
     ChangeState,
     WorkspaceChange,
     content_hash,
+    DIRECTORY_STATE_HASH,
 )
 from coding_agent.coordinator import ChangeCoordinator, CoordinatedChange
 from coding_agent.models import (
@@ -124,6 +125,15 @@ class TaskOrchestrator:
         """
         workspace = self.coordinator.workspace
 
+        if proposal.change_type == ChangeType.MKDIR:
+            try:
+                target = workspace.resolve_create_path(proposal.path)
+            except WorkspacePathError as exc:
+                raise OrchestrationError(
+                    f"Cannot safely create directory {proposal.path!r}: {exc}"
+                ) from exc
+            return proposal, None
+
         if proposal.change_type == ChangeType.DELETE:
             try:
                 target = workspace.resolve_path(proposal.path)
@@ -178,7 +188,16 @@ class TaskOrchestrator:
 
         workspace = self.coordinator.workspace
 
-        if proposal.change_type.value == "create":
+        if proposal.change_type == ChangeType.MKDIR:
+            try:
+                target = workspace.resolve_create_path(proposal.path)
+            except Exception as exc:
+                raise OrchestrationError(
+                    f"Cannot create directory {proposal.path!r}: target must not already exist."
+                ) from exc
+            original_bytes = None
+            resulting_hash = DIRECTORY_STATE_HASH
+        elif proposal.change_type.value == "create":
             try:
                 workspace.resolve_create_path(proposal.path)
             except Exception as exc:
@@ -213,7 +232,7 @@ class TaskOrchestrator:
             operation=proposal.change_type.value,
             state=ChangeState.PROPOSED,
             original_hash=content_hash(original_bytes),
-            resulting_hash=content_hash(intended_bytes),
+            resulting_hash=(resulting_hash if proposal.change_type == ChangeType.MKDIR else content_hash(intended_bytes)),
             reason=proposal.reason,
         )
 
@@ -578,10 +597,21 @@ class TaskOrchestrator:
             try:
                 approved_changes = []
                 normalized_proposals = []
+                planned_directories: set[str] = set()
                 for index, proposal in enumerate(plan.changes):
                     proposal, normalization_note = self._normalize_proposal_operation(
                         proposal
                     )
+                    if proposal.change_type == ChangeType.MKDIR:
+                        parent = Path(proposal.path.replace("\\", "/")).parent.as_posix()
+                        if parent not in {"", "."}:
+                            parent_path = self.coordinator.workspace.root / parent
+                            if not parent_path.is_dir() and parent.casefold() not in planned_directories:
+                                raise OrchestrationError(
+                                    f"Directory {proposal.path!r} has a missing parent {parent!r}; "
+                                    "add a parent mkdir operation before this operation."
+                                )
+                        planned_directories.add(Path(proposal.path.replace("\\", "/")).as_posix().rstrip("/").casefold())
                     if normalization_note:
                         notes.append(normalization_note)
                         warning = self._record_task_event(
@@ -645,10 +675,11 @@ class TaskOrchestrator:
                 diagnostic = (
                     "PLAN VALIDATION FAILURE\n"
                     f"{message}\n"
-                    "Correct the implementation plan. Re-check the workspace file inventory. "
-                    "Use modify for an existing file that needs changes, create only for a "
-                    "genuinely missing file, and delete only for an existing file explicitly "
-                    "intended for removal. Do not weaken path safety, do not alter unrelated "
+                    "Correct the implementation plan. Re-check the workspace inventory, including directories. "
+                    "Use mkdir only for a missing, explicitly required directory; create only for a "
+                    "genuinely missing file; modify existing files; and delete only an existing file "
+                    "explicitly intended for removal. Put parent mkdir operations before child directories. "
+                    "Do not weaken path safety, do not alter unrelated "
                     "files, and return a complete corrected plan for the entire task."
                 )
                 warning = self._record_task_event(

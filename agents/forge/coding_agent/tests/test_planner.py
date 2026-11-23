@@ -178,14 +178,14 @@ def test_planner_prompt_groups_units_by_target_path_without_conflicting_instruct
     CodingPlanner(client).plan(_task(), specification=specification)
 
     prompt = client.prompt
-    assert "one planned file change for each unique target_path" in prompt
+    assert "one operation for each unique target_path" in prompt
     assert "One change DOES cover all units in the same-path group" in prompt
     assert "- FILE: docker-compose.yml" in prompt
     assert "UNIT: UNIT-1 — Define services" in prompt
     assert "UNIT: UNIT-2 — Configure PostgreSQL" in prompt
     assert "\\n- FILE:" not in prompt
     assert "one changed file does not cover sibling units" not in prompt
-    assert 'Never use "." or a directory-only path' in prompt
+    assert 'Use mkdir only for an explicitly required DIRECTORY target' in prompt
 
 
 
@@ -276,3 +276,33 @@ def test_planner_separates_validation_feedback_from_workspace_context():
     assert "PostgreSQL volume is not declared at the Compose root" in prompt
     assert "PREVIOUS DRAFT FILE CONTENTS" in prompt
     assert "Workspace inventory: (empty)" in prompt
+
+
+def test_planner_accepts_explicit_directory_creation_operation():
+    response = _response("VALUE = 1\n")
+    response["changes"].insert(0, {
+        "path": "frontend",
+        "change_type": "mkdir",
+        "reason": "Create the required frontend directory",
+        "content": None,
+    })
+    client = FakeClient(response)
+
+    plan = CodingPlanner(client).plan(_task())
+
+    assert plan.changes[0].change_type.value == "mkdir"
+    assert plan.changes[0].path == "frontend"
+    assert plan.changes[0].content is None
+
+
+def test_planner_rejects_directory_creation_with_file_content():
+    response = _response("VALUE = 1\n")
+    response["changes"].insert(0, {
+        "path": "frontend",
+        "change_type": "mkdir",
+        "reason": "Create the required frontend directory",
+        "content": "not allowed",
+    })
+
+    with pytest.raises(PlanningError, match="must use content null"):
+        CodingPlanner(FakeClient(response)).plan(_task())

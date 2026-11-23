@@ -86,3 +86,55 @@ def test_spec_rejects_non_sandbox_execution_profile():
 def test_contract_rejects_duplicate_input_names():
     with pytest.raises(ValueError, match="unique"):
         InterfaceContract("C", "X", "fn", "function", inputs=(InterfaceField("x", "str"), InterfaceField("x", "int")))
+
+
+def test_requirement_assigns_deterministic_acceptance_criterion_ids():
+    requirement = Requirement(
+        "REQ-AUTH", "Users can authenticate.",
+        acceptance_criteria=("Valid credentials work.", "Invalid credentials fail."),
+    )
+    assert len(requirement.acceptance_criterion_ids) == 2
+    assert all(item.startswith("REQ-AUTH-AC-") for item in requirement.acceptance_criterion_ids)
+    reordered = Requirement(
+        "REQ-AUTH", "Users can authenticate.",
+        acceptance_criteria=("Invalid credentials fail.", "Valid credentials work."),
+    )
+    assert dict(zip(requirement.acceptance_criteria, requirement.acceptance_criterion_ids)) == dict(
+        zip(reordered.acceptance_criteria, reordered.acceptance_criterion_ids)
+    )
+
+
+def test_specification_rejects_unknown_acceptance_criterion_references(tmp_path):
+    requirement = Requirement(
+        "REQ-AUTH", "Users can authenticate.",
+        acceptance_criteria=("Valid credentials work.",),
+    )
+    unit = ImplementationUnit(
+        "UNIT-AUTH", "Authentication", "src/auth.py",
+        satisfies=("REQ-AUTH",),
+        implements_acceptance_criteria=("REQ-AUTH-AC-999",),
+    )
+    with pytest.raises(ValueError, match="unknown acceptance criteria"):
+        EngineeringSpecification(
+            "spec-auth", "task-auth", "Build auth", str(tmp_path),
+            requirements=(requirement,), implementation_units=(unit,),
+        )
+
+
+def test_specification_rejects_acceptance_criterion_mapped_to_unrelated_requirement(tmp_path):
+    requirement = Requirement(
+        "REQ-AUTH", "Users can authenticate.",
+        acceptance_criteria=("Valid credentials work.",),
+    )
+    other_requirement = Requirement("REQ-LOG", "Login attempts are logged.")
+    unit = ImplementationUnit(
+        "UNIT-LOG", "Login logging", "src/logging.py",
+        satisfies=("REQ-LOG",),
+        implements_acceptance_criteria=(requirement.acceptance_criterion_ids[0],),
+    )
+    with pytest.raises(ValueError, match="outside its satisfied requirements"):
+        EngineeringSpecification(
+            "spec-auth", "task-auth", "Build auth", str(tmp_path),
+            requirements=(requirement, other_requirement),
+            implementation_units=(unit,),
+        )
