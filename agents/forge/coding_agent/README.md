@@ -124,8 +124,77 @@ qwen2.5-coder:14b   .env FORGE_CODING_AGENT_DEVELOPMENT_MODEL
 qwen2.5-coder:14b   unit.md (development/python_developer) via http://127.0.0.1:54510
 ```
 
+Each output also records the tokens it used (`prompt`, `output`, `thinking`
+where reported, and `total`).
+
 `coding-agent units --json` shows each unit's `.env` variable name
 (`model_env_var`) and its effective model.
+
+### Gemini (optional cloud models)
+
+Any model setting can point at Google's Gemini API instead of Ollama by adding
+a `gemini:` prefix:
+
+```ini
+GEMINI_API_KEY=<your AI Studio key>
+FORGE_CODING_AGENT_DEVELOPMENT_TECH_LEAD_MODEL=gemini:gemini-3.5-flash-lite
+```
+
+A value without a prefix (or with `ollama:`) is an Ollama model, so local stays
+the default and only units you assign go to the cloud. Anything a Gemini unit
+sees, including project code, leaves the machine. On the free tier, Google may
+use it to improve its products.
+
+**Named models** let many units share one Gemini model that you change in one
+place:
+
+```ini
+FORGE_GEMINI_REASONING_MODEL=gemini-4-hydrogen
+FORGE_GEMINI_GENERAL_MODEL=gemini-3.5-flash-lite
+FORGE_GEMINI_LITE_MODEL=gemma-4-26b-a4b-it
+
+FORGE_CODING_AGENT_LEADERSHIP_ENGINEERING_DIRECTOR_MODEL=gemini:@reasoning
+FORGE_CODING_AGENT_ARCHITECTURE_MODEL=gemini:@general
+```
+
+`gemini:@<name>` reads `FORGE_GEMINI_<NAME>_MODEL`. The report shows both steps,
+for example `.env FORGE_CODING_AGENT_ARCHITECTURE_MODEL -> .env FORGE_GEMINI_GENERAL_MODEL`.
+
+**Quotas and fallback.** Free tiers allow few requests, so each Gemini call
+goes through a quota tracker:
+
+```ini
+# requests per minute, tokens per minute, requests per day (0 or blank = no local limit)
+GEMINI_QUOTA_GEMINI_4_HYDROGEN=5,250000,20
+GEMINI_QUOTA_GEMINI_3_5_FLASH_LITE=15,250000,500
+```
+
+- **Over a per-day limit:** the call is not sent.
+- **Per-minute window full:** the tracker waits for a slot if one frees up
+  within `GEMINI_MAX_WAIT` seconds (default 15); otherwise the call is not sent.
+- **Google returns 429:** the model is benched for the delay Google asks for,
+  or until the next reset when the daily quota is spent. Calls during the
+  bench are not sent.
+- **Overload (HTTP 5xx) or a timeout:** the call is retried `GEMINI_RETRIES`
+  times (default 2), with short pauses.
+
+When a call is not sent or still fails, that one call goes to the unit's
+role-type default on Ollama. Fallback happens once, from Gemini to local,
+so it can't loop. The output's model source then says why, e.g.
+`gemini:gemini-4-hydrogen unavailable, fell back to the planning default (...)`.
+
+Per-day counts and benches are saved in `~/.alisa/forge/gemini_usage.json`
+(set `GEMINI_USAGE_FILE` to move it), so they carry over between runs. They
+reset at midnight Pacific, when Google resets its quotas.
+
+Gemini decides its own thinking, so the `think` setting doesn't apply to it.
+Streaming, tool calling and multi-turn conversations aren't used, because the
+agent makes single structured calls.
+
+**Choosing assignments.** Units that make few calls per run suit the free
+tier: the Director, architects and division leads. Developers and the
+Debugging Specialist make a call per file plus repairs, so they would use up a
+20-requests-per-day model in two or three runs.
 
 ### Thinking and temperature
 
@@ -290,10 +359,25 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
   Divisions then run in order, phase by phase.
 - **Division leads** split build work into items, one owner per file, when the division has two or
   more builders. Development's Tech Lead does this whenever Development builds.
-- **The files gate** is the only blocking check: every assigned file is produced, Python compiles
-  and JSON parses. If it fails, the Debugging Specialist gets up to 2 repair rounds. If it still
-  fails, nothing is written, and proposals are kept under `.coding-agent/runs/<run_id>/proposed/`.
+- **Developers see each other's work.** Each developer gets the signatures of the Python files
+  teammates already wrote this run. Leads must name, in each work item, the functions and classes a
+  file has to provide.
+- **Target platform.** Every specialist is told the OS and Python version the code must run on:
+  this machine by default, `CODING_AGENT_TARGET_ENVIRONMENT` in `.env`, or `target_environment`
+  on the request.
+- **The files gate** is the only blocking check. It requires that:
+  - every assigned file is produced
+  - Python compiles
+  - JSON parses
+  - every `from x import name` between the project's own modules finds `name`
+
+  It never runs the generated code, so whether the code behaves correctly
+  stays with your own testing. If the gate fails, the Debugging Specialist gets up to 2 repair rounds. If it
+  still fails, nothing is written, and proposals are kept under `.coding-agent/runs/<run_id>/proposed/`.
 - **Review findings** are advisory. `--fix-review` sends high and critical findings back for one round.
+- **Failures are visible.**
+  - A run where every specialist failed, and nothing was delivered, reports `failed` with the reasons.
+  - When some specialists fail, the run continues, and each failure is listed as a warning.
 - **The CLI** proposes first and writes only after you type `yes`.
 
 ## Context
@@ -336,7 +420,14 @@ coding-agent serve --allow-root D:\work --unit postgres_developer --port 8801
 |---|---|
 | `OLLAMA_HOST` | Ollama URL (default `http://localhost:11434`) |
 | `OLLAMA_MODEL`, `FORGE_CODING_AGENT_*_MODEL` | models per role type, agent, division or specialist (see Models) |
-| `CODING_AGENT_LLM_TIMEOUT`, `CODING_AGENT_OLLAMA_NUM_PREDICT`, `CODING_AGENT_OLLAMA_NUM_CTX` | model request limits |
+| `FORGE_CODING_AGENT_*_THINK`, `FORGE_CODING_AGENT_*_TEMPERATURE`, `CODING_AGENT_TEMPERATURE` | thinking and temperature per unit (see Thinking and temperature) |
+| `CODING_AGENT_LLM_TIMEOUT`, `CODING_AGENT_OLLAMA_NUM_PREDICT`, `CODING_AGENT_OLLAMA_NUM_CTX` | Ollama request limits |
+| `CODING_AGENT_TARGET_ENVIRONMENT` | OS and Python the generated code must run on (default: this machine) |
+| `GEMINI_API_KEY`, `GEMINI_API_BASE` | Gemini access (only needed when a unit uses `gemini:`) |
+| `FORGE_GEMINI_<NAME>_MODEL` | named Gemini models, used as `gemini:@<name>` |
+| `GEMINI_QUOTA_<MODEL>` | `rpm,tpm,rpd` limits for quota-aware routing |
+| `GEMINI_TIMEOUT`, `GEMINI_RETRIES`, `GEMINI_MAX_WAIT` | Gemini request timeout (default 120 s), retries on overload (default 2), longest wait for a per-minute slot (default 15 s) |
+| `GEMINI_USAGE_FILE` | where per-day Gemini usage is saved (default `~/.alisa/forge/gemini_usage.json`) |
 | `CODING_AGENT_API_TOKEN` | bearer token for services and for calls to remote units |
 | `CODING_AGENT_REMOTE_TIMEOUT` | seconds to wait for a remote unit (default 3600) |
 
@@ -344,7 +435,7 @@ coding-agent serve --allow-root D:\work --unit postgres_developer --port 8801
 
 Each run writes to `<workspace>/.coding-agent/runs/<run_id>/`:
 
-- `report.json` (includes each output's model and its source)
+- `report.json` (each output's model, model source and token usage, plus the run's warnings)
 - `handoff.md`
 - `changes.jsonl` (when changes are written)
 - `backup/` (copies of overwritten files)
