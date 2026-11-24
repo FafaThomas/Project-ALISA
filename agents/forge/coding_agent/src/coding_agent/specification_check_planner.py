@@ -14,6 +14,23 @@ from coding_agent.engineering_spec import (
 )
 
 
+# Wording that asks for a human opinion rather than an observable result.
+# "Clear message" and similar are results a test can check, so they are not listed.
+_HUMAN_JUDGMENT = re.compile(
+    r"\b(?:readab\w*|visual\w*|aesthetic\w*|appearance|looks?|appears?|"
+    r"user[- ]experience|usab\w*|human|person|reviewer|judg\w*|pleasant\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_python_toolchain(program: str) -> bool:
+    """True for python/py executables, including full paths such as sys.executable."""
+    name = Path(str(program).replace("\\", "/")).name.casefold()
+    return name in {"python", "python3", "py", "python.exe", "python3.exe", "py.exe", "pytest", "pytest.exe"} or (
+        name.startswith("python") and name.replace(".exe", "").replace("python", "").replace(".", "").isdigit()
+    )
+
+
 def requirement_marker(requirement_id: str) -> str:
     """Pytest marker name for a requirement ID, e.g. REQ-002 -> req_002."""
     return re.sub(r"[^0-9a-z]+", "_", requirement_id.casefold()).strip("_")
@@ -47,6 +64,13 @@ class SpecificationCheckPlanner:
         prepared = []
         notes = []
         for criterion in specification.verification:
+            # Commands proposed by the model run unchecked, so only the project's
+            # own toolchain may run. Other programs (grep, pydoc, anything that
+            # is not Python) are dropped; the criterion is then checked by tests,
+            # an artifact check, or a human, as usual.
+            if criterion.command and not _is_python_toolchain(criterion.command[0]):
+                notes.append(f"{criterion.criterion_id}: dropped proposed command {criterion.command[0]!r} (not the project's Python toolchain)")
+                criterion = replace(criterion, command=())
             covered_requirement_ids = set()
             for reference in criterion.covers:
                 if reference in requirements:
@@ -86,11 +110,28 @@ class SpecificationCheckPlanner:
                 item for item in covered_requirement_ids
                 if requirements[item].kind != RequirementKind.CONSTRAINT
             )
+            # A manual criterion about program behavior (output, exit status, a
+            # result) is checkable by a test, so it is verified by the tagged
+            # tests too. Only criteria that need human judgment stay manual.
+            judgment_only = bool(_HUMAN_JUDGMENT.search(criterion.description))
+            checkable_manual = criterion.kind == VerificationKind.MANUAL and not judgment_only
+            # A requirement about a file or document (README, layout, config) is an
+            # artifact check, not a behavior test; no test would ever be tagged for it.
+            artifact_requirement = any(
+                self._AUTOMATABLE.search(
+                    " ".join((requirements[item].description, *requirements[item].acceptance_criteria))
+                )
+                for item in behavior_requirement_ids
+            )
             if (
                 not criterion.command
                 and python_test_paths
                 and behavior_requirement_ids
-                and criterion.kind in {VerificationKind.BEHAVIORAL, VerificationKind.RUNTIME, VerificationKind.BUILD}
+                and not artifact_requirement
+                and (
+                    criterion.kind in {VerificationKind.BEHAVIORAL, VerificationKind.RUNTIME, VerificationKind.BUILD}
+                    or checkable_manual
+                )
             ):
                 markers = " or ".join(requirement_marker(item) for item in behavior_requirement_ids)
                 prepared.append(replace(
@@ -169,7 +210,7 @@ class SpecificationCheckPlanner:
                     command=command,
                 ))
                 notes.append(f"{criterion.criterion_id}: deterministic artifact check prepared")
-            elif generated_manual_fallback and python_test_paths and behavior_requirement_ids:
+            elif generated_manual_fallback and python_test_paths and behavior_requirement_ids and not artifact_requirement:
                 # A gap-fill checklist exists only because the model supplied no
                 # check. With no artifact check available, require tagged tests
                 # for the requirement before falling back to a human checklist.

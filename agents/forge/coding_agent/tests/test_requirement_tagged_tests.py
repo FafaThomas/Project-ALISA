@@ -31,6 +31,8 @@ def _spec(tmp_path, verification, *, with_tests=True):
             Requirement("REQ-008", "Use Windows-compatible verification commands",
                         RequirementKind.CONSTRAINT,
                         acceptance_criteria=("Commands run on Windows",)),
+            Requirement("REQ-009", "Create README.md with project description and usage instructions",
+                        acceptance_criteria=("README.md explains how to run the program",)),
         ),
         architecture=(ArchitectureModule("MOD-1", "Game", "Game and tests", file_paths=tuple(paths)),),
         implementation_units=tuple(units),
@@ -141,3 +143,66 @@ def test_model_written_manual_criterion_is_left_for_a_human(tmp_path):
 
     assert prepared.verification[0].kind == VerificationKind.MANUAL
     assert prepared.verification[0].command == ()
+
+
+def test_model_written_manual_behavior_criterion_is_checked_by_tagged_tests(tmp_path):
+    # A program-output criterion is checkable, so it must not block as manual.
+    spec = _spec(tmp_path, [
+        VerificationCriterion("VER-001", "Running python main.py 2 + 3 prints 5",
+                              VerificationKind.MANUAL, covers=("REQ-002",)),
+    ])
+
+    prepared, _ = SpecificationCheckPlanner(tmp_path).prepare(spec)
+    criterion = prepared.verification[0]
+
+    assert criterion.kind == VerificationKind.BEHAVIORAL
+    assert "req_002" in criterion.command
+
+
+def test_error_message_criterion_with_clear_wording_is_still_checkable(tmp_path):
+    spec = _spec(tmp_path, [
+        VerificationCriterion("VER-002", "Dividing by zero raises a ValueError with a clear message",
+                              VerificationKind.MANUAL, covers=("REQ-002",)),
+    ])
+
+    prepared, _ = SpecificationCheckPlanner(tmp_path).prepare(spec)
+
+    assert prepared.verification[0].kind == VerificationKind.BEHAVIORAL
+
+
+def test_model_proposed_non_python_command_is_dropped(tmp_path):
+    # grep and pydoc are not the project's toolchain and were never checked.
+    spec = _spec(tmp_path, [
+        VerificationCriterion("VER-004", "Ensure no eval/exec usage", VerificationKind.STATIC,
+                              command=("grep", "-E", "'eval|exec'", "game.py"), covers=("REQ-002",)),
+    ])
+
+    prepared, notes = SpecificationCheckPlanner(tmp_path).prepare(spec)
+
+    assert all(not item.command or item.command[0] != "grep" for item in prepared.verification)
+    assert any("dropped proposed command 'grep'" in note for note in notes)
+
+
+def test_model_proposed_python_command_is_kept(tmp_path):
+    spec = _spec(tmp_path, [
+        VerificationCriterion("VER-002", "Running python main.py 2 + 3 runs",
+                              VerificationKind.BEHAVIORAL, command=("python", "main.py", "2", "+", "3"),
+                              covers=("REQ-002",)),
+    ])
+
+    prepared, _ = SpecificationCheckPlanner(tmp_path).prepare(spec)
+
+    assert prepared.verification[0].command == ("python", "main.py", "2", "+", "3")
+
+
+def test_readme_requirement_is_an_artifact_check_not_a_tagged_test(tmp_path):
+    # Regression: a README gap-fill checklist was sent to pytest and failed with exit 5.
+    spec = _spec(tmp_path, [
+        VerificationCriterion("VER-AUTO-001", "Manually verify REQ-009: Create README.md with usage",
+                              VerificationKind.MANUAL, covers=("REQ-009",)),
+    ])
+    prepared, _ = SpecificationCheckPlanner(tmp_path).prepare(spec)
+    criterion = prepared.verification[0]
+
+    assert "coding_agent.specification_checks" in criterion.command
+    assert not any(part.startswith("req_") for part in criterion.command)

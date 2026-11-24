@@ -468,3 +468,77 @@ def test_single_file_repair_keeps_the_requested_file_and_ignores_extras(tmp_path
     )
 
     assert [item.path for item in repaired] == ["config.yml"]
+
+
+def _readme_only_spec(tmp_path):
+    from coding_agent.engineering_spec import (
+        EngineeringSpecification, ImplementationUnit, Requirement,
+    )
+
+    return EngineeringSpecification(
+        specification_id="spec-repair-retry",
+        task_id="task-test",
+        objective="Create docs",
+        workspace=str(tmp_path),
+        requirements=(Requirement("REQ-1", "Create README.md"),),
+        implementation_units=(
+            ImplementationUnit("UNIT-1", "Create docs", "README.md", satisfies=("REQ-1",)),
+        ),
+    )
+
+
+class _ScriptedClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.prompts = []
+
+    def generate_json(self, prompt):
+        self.prompts.append(prompt)
+        return self.responses.pop(0)
+
+
+def test_single_file_repair_retries_once_when_the_file_is_missing(tmp_path):
+    from coding_agent.models import ImplementationPlan
+
+    # Regression: the calculator run's README repair came back empty and ended the attempt.
+    client = _ScriptedClient([
+        {"summary": "Nothing", "changes": []},
+        {"summary": "Docs", "changes": [{
+            "path": "README.md", "change_type": "create",
+            "reason": "Document usage", "content": "# Calculator\n",
+        }]},
+    ])
+
+    repaired = CodingPlanner(client).repair_missing_changes(
+        _task(),
+        context="",
+        specification=_readme_only_spec(tmp_path),
+        existing_plan=ImplementationPlan(task_id="task-test", summary="Initial", changes=()),
+        required_paths=("README.md",),
+        issues=("README is missing",),
+    )
+
+    assert [item.path for item in repaired] == ["README.md"]
+    assert len(client.prompts) == 2
+    assert "WAS REJECTED" in client.prompts[1]
+    assert "missing: readme.md" in client.prompts[1]
+
+
+def test_single_file_repair_fails_after_its_retry(tmp_path):
+    from coding_agent.models import ImplementationPlan
+
+    client = _ScriptedClient([
+        {"summary": "Nothing", "changes": []},
+        {"summary": "Still nothing", "changes": []},
+    ])
+
+    with pytest.raises(PlanningError, match="must return exactly the requested paths"):
+        CodingPlanner(client).repair_missing_changes(
+            _task(),
+            context="",
+            specification=_readme_only_spec(tmp_path),
+            existing_plan=ImplementationPlan(task_id="task-test", summary="Initial", changes=()),
+            required_paths=("README.md",),
+            issues=("README is missing",),
+        )
+    assert len(client.prompts) == 2

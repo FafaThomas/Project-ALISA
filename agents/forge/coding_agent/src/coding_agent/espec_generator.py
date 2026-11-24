@@ -438,6 +438,7 @@ IDENTIFIER NAMESPACES ARE DISTINCT AND MUST NEVER BE MIXED:
 Use only the canonical verification kinds listed above. API, unit, integration, end-to-end,
 and generic tests use "behavioral"; linting and type checks use "static"; smoke checks use
 "runtime"; human review uses "manual".
+Use "manual" only for judgments a test cannot make (readability, visual appearance, reviewer opinion). Any criterion about program output, exit status, a computed result, or a user-visible behavior must be "behavioral" and covered by the requirement's tests.
 For every verification criterion with kind "manual", command MUST be an empty array ([]).
 Put all human inspection actions and step-by-step instructions in the description field.
 The command field is reserved for executable command arguments for non-manual criteria;

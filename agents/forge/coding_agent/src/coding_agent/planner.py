@@ -157,6 +157,8 @@ class CodingPlanner:
 
     # Bound on how much of each already-repaired file is shown to later calls.
     _REPAIRED_FILE_CONTEXT_CHARS = 6000
+    # Model calls allowed per file in a focused repair (first try plus one retry).
+    _REPAIR_TRIES_PER_FILE = 2
 
     def repair_missing_changes(
         self,
@@ -187,17 +189,33 @@ class CodingPlanner:
                     f"FILE: {change.path}\n{(change.content or '')[:self._REPAIRED_FILE_CONTEXT_CHARS]}"
                     for change in repaired
                 )
-            repaired.extend(
-                self._repair_file_group(
-                    task,
-                    context=context + sibling_context,
-                    specification=specification,
-                    existing_plan=existing_plan,
-                    required_paths=(path,),
-                    issues=issues,
-                    ignore_extra_paths=True,
-                )
-            )
+            # One extra try per file: a small model sometimes returns nothing,
+            # or only other files, for a single-file request. The second call
+            # is told exactly what was wrong; a second failure is final.
+            retry_note = ""
+            for repair_try in range(1, self._REPAIR_TRIES_PER_FILE + 1):
+                try:
+                    repaired.extend(
+                        self._repair_file_group(
+                            task,
+                            context=context + sibling_context + retry_note,
+                            specification=specification,
+                            existing_plan=existing_plan,
+                            required_paths=(path,),
+                            issues=issues,
+                            ignore_extra_paths=True,
+                        )
+                    )
+                    break
+                except PlanningError as exc:
+                    if repair_try >= self._REPAIR_TRIES_PER_FILE:
+                        raise
+                    LOGGER.warning("Focused repair for %s was rejected; retrying once: %s", path, exc)
+                    retry_note = (
+                        f"\n\nYOUR PREVIOUS RESPONSE FOR {path} WAS REJECTED: {exc}\n"
+                        f"Return a JSON object whose changes list contains exactly one FileChange "
+                        f"with path \"{path}\" and its complete content."
+                    )
         return tuple(repaired)
 
     def _repair_file_group(
@@ -519,6 +537,7 @@ ARTIFACT CONTENT CONTRACT:
 - If a constraint is explicitly mapped to implementation units, those units are mandatory and must be implemented.
 - A prohibition ("must not import X", "without Y") governs every file you write that it applies to. Before returning JSON, scan each such file's import lines and confirm none of the forbidden modules appear. Put any dependency the prohibited module would provide in a file the prohibition does not cover.
 - Tests must check observable behavior with concrete expected values that follow from the requirement. Never write a placeholder test such as asserting that a function returned a truthy value.
+- Behavior of a runnable program (its output, exit status, and error messages) must be tested by running the program in a test, for example with subprocess.run([sys.executable, "main.py", "2", "+", "3"], capture_output=True, text=True, cwd=<project root>) and asserting on stdout and returncode. Import sys and subprocess in that test file.
 - For Python tests, tag each test function with a pytest marker for every requirement it verifies. The marker is the requirement ID in lowercase with non-alphanumeric characters replaced by "_" (REQ-002 becomes @pytest.mark.req_002). The verifier runs `python -m pytest -m req_002` for each requirement, so a requirement with no tagged test fails verification. Every test file that uses pytest.mark must start with `import pytest`.
 - A test may call only methods and functions that your planned code defines. Before returning JSON, list every method a test calls on a planned class and confirm each one is defined in the planned files. Remove or rename any call you did not define.
 - Only contracts referenced by implementation units are implementation obligations. Unreferenced contracts are context/verification descriptions and must not create extra file changes.
