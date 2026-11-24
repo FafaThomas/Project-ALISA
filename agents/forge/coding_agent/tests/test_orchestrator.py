@@ -1608,3 +1608,138 @@ def test_undefined_name_in_generated_python_gets_the_bounded_planning_correction
     assert planner.calls == 2
     assert "PLAN CONTENT SYNTAX FAILURE" in planner.contexts[1]
     assert "uses names it never defines or imports: subprocess (line 2)" in planner.contexts[1]
+
+
+class _ExitByCommandRunner(FakeCommandRunner):
+    """Return a chosen exit code per command, decided by a predicate."""
+
+    def __init__(self, workspace, failing):
+        super().__init__(workspace)
+        self.failing = failing
+
+    def run(self, command, *, approved_commands):
+        self.calls.append((tuple(command), tuple(approved_commands)))
+        return CommandResult(command=tuple(command), exit_code=1 if self.failing(tuple(command)) else 0)
+
+
+def _advisory_run(tmp_path, *, gate, failing, with_test=False):
+    from coding_agent.engineering_spec import (
+        ArchitectureModule, EngineeringSpecification, ImplementationUnit, Requirement, UnitKind,
+        VerificationCriterion, VerificationKind,
+    )
+
+    task = make_task(tmp_path)
+    paths = ("config.py", "tests/test_config.py") if with_test else ("config.py",)
+    units = [ImplementationUnit("UNIT-1", "Config", "config.py", satisfies=("REQ-1",))]
+    if with_test:
+        units.append(ImplementationUnit(
+            "UNIT-2", "Config test", "tests/test_config.py", kind=UnitKind.TEST, satisfies=("REQ-1",),
+        ))
+    specification = EngineeringSpecification(
+        "spec-advisory", task.task_id, "Create config", str(tmp_path),
+        requirements=(Requirement("REQ-1", "Create config."),),
+        architecture=(ArchitectureModule("config", "Config", "Config", file_paths=paths),),
+        implementation_units=tuple(units),
+        verification=(
+            VerificationCriterion(
+                "VER-1", "Config tests pass", VerificationKind.BEHAVIORAL,
+                command=("python", "-m", "pytest", "-q", "tests/test_config.py"), covers=("REQ-1",),
+            ),
+            VerificationCriterion("VER-2", "Human confirms config", VerificationKind.MANUAL, covers=("REQ-1",)),
+        ),
+    )
+    changes = [FileChange("config.py", ChangeType.CREATE, "Create config", "VALUE = 1\n")]
+    if with_test:
+        changes.append(FileChange(
+            "tests/test_config.py", ChangeType.CREATE, "Test config",
+            "import config\n\ndef test_value():\n    assert config.VALUE == 1\n",
+        ))
+    plan = make_plan(task, changes=changes, commands=[])
+    workspace = Workspace(tmp_path)
+    runner = _ExitByCommandRunner(workspace, failing)
+    orchestrator = TaskOrchestrator(
+        FakePlanner(plan), ChangeCoordinator(workspace), runner, VerificationEngine(),
+        verification_gate=gate,
+    )
+    asked = []
+
+    def manual_handler(criteria):
+        asked.extend(criteria)
+        return {}
+
+    result = orchestrator.run(
+        task, approval_handler=lambda proposed: True, specification=specification,
+        manual_verification_handler=manual_handler,
+    )
+    return result, runner, asked
+
+
+def _is_spec_pytest(command):
+    return "pytest" in command
+
+
+def test_advisory_mode_completes_when_core_checks_pass_and_spec_checks_fail(tmp_path):
+    result, runner, asked = _advisory_run(tmp_path, gate="tests", failing=_is_spec_pytest)
+
+    assert result.status == TaskStatus.COMPLETED, result.errors
+    # The specification command still ran and is reported, but does not gate.
+    assert any("pytest" in command for command, _ in runner.calls)
+    assert any(note.startswith("Specification checks (advisory, not gating)") for note in result.notes)
+    assert any(note.startswith("Advisory: VER-1 FAIL") for note in result.notes)
+    # No human evidence is requested when the specification does not gate.
+    assert asked == []
+    assert (tmp_path / "config.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+
+
+def test_strict_mode_still_fails_when_a_spec_check_fails(tmp_path):
+    result, _, _ = _advisory_run(tmp_path, gate="specification", failing=_is_spec_pytest)
+
+    assert result.status == TaskStatus.FAILED
+    assert not (tmp_path / "config.py").exists()
+
+
+def test_advisory_mode_fails_on_core_checks_and_reports_only_core_results(tmp_path):
+    # The core file/syntax check is the "python -c" command the verification planner builds.
+    result, _, _ = _advisory_run(
+        tmp_path, gate="tests", failing=lambda command: len(command) > 1 and command[1] == "-c",
+    )
+
+    assert result.status == TaskStatus.FAILED
+    assert result.command_results
+    assert all(item.command[1] == "-c" for item in result.command_results)
+    assert not (tmp_path / "config.py").exists()
+
+
+def test_files_gate_completes_when_the_project_tests_fail(tmp_path):
+    # Default CLI gate: the agent delivers the repository; failing project tests are reported, not blocking.
+    result, _, _ = _advisory_run(tmp_path, gate="files", failing=_is_spec_pytest, with_test=True)
+
+    assert result.status == TaskStatus.COMPLETED, result.errors
+    assert any(note.startswith("Advisory check failed (not gating): python -m pytest") for note in result.notes)
+    assert (tmp_path / "config.py").is_file()
+
+
+def test_tests_gate_fails_when_the_project_tests_fail(tmp_path):
+    result, _, _ = _advisory_run(tmp_path, gate="tests", failing=_is_spec_pytest, with_test=True)
+
+    assert result.status == TaskStatus.FAILED
+    assert not (tmp_path / "config.py").exists()
+
+
+def test_files_gate_still_fails_when_a_planned_file_does_not_compile(tmp_path):
+    result, _, _ = _advisory_run(
+        tmp_path, gate="files", failing=lambda command: len(command) > 1 and command[1] == "-c",
+    )
+
+    assert result.status == TaskStatus.FAILED
+
+
+def test_unknown_verification_gate_is_rejected(tmp_path):
+    import pytest as _pytest
+
+    workspace = Workspace(tmp_path)
+    with _pytest.raises(ValueError, match="verification_gate"):
+        TaskOrchestrator(
+            FakePlanner(None), ChangeCoordinator(workspace), FakeCommandRunner(workspace),
+            VerificationEngine(), verification_gate="everything",
+        )

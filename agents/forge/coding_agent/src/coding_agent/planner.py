@@ -497,7 +497,7 @@ FOCUSED REPAIR RULES:
 - Return exactly one FileChange for every TARGET FILE listed above.
 - Return no other path, no duplicate path, and do not omit any listed target.
 - Do not create a new file to hold code. If a listed target needs a class or function, define it inside the listed file that owns that responsibility; a path outside TARGET FILE is rejected.
-- In Python test files, tag each test with @pytest.mark.req_NNN for every requirement it verifies (REQ-002 becomes req_002), and start the file with `import pytest`.
+- Python test files stay light: a few unit tests per module that import it and check concrete results. Import everything a test uses.
 - Keep every target path exactly as written, including directory and filename.
 - Satisfy every acceptance criterion for every unit grouped under that target path.
 - When a target has multiple units, combine all their obligations in that one file.
@@ -696,10 +696,9 @@ ARTIFACT CONTENT CONTRACT:
 - A constraint with no implementation-unit mapping is a compliance boundary, not a request to create or modify a file merely to demonstrate compliance. Respect it in every relevant change and follow its verification criteria.
 - If a constraint is explicitly mapped to implementation units, those units are mandatory and must be implemented.
 - A prohibition ("must not import X", "without Y") governs every file you write that it applies to. Before returning JSON, scan each such file's import lines and confirm none of the forbidden modules appear. Put any dependency the prohibited module would provide in a file the prohibition does not cover.
-- Tests must check observable behavior with concrete expected values that follow from the requirement. Never write a placeholder test such as asserting that a function returned a truthy value.
+- When tests are written, keep them light. Their job is to show each component runs: one or two unit tests per public function that import the module, call the function, and check a concrete result. Do not test GUI windows, documentation, or full program runs. Tests must match the code you write.
+- Tests check concrete expected values. Never write a placeholder test such as asserting that a function returned a truthy value.
 - Entry-point scripts must keep argument parsing and other side effects inside a function called under if __name__ == "__main__":, so tests can import them without running the program.
-- Behavior of a runnable program (its output, exit status, and error messages) must be tested by running the program in a test, for example with subprocess.run([sys.executable, "main.py", "2", "+", "3"], capture_output=True, text=True, cwd=<project root>) and asserting on stdout and returncode. Import sys and subprocess in that test file.
-- For Python tests, tag each test function with a pytest marker for every requirement it verifies. The marker is the requirement ID in lowercase with non-alphanumeric characters replaced by "_" (REQ-002 becomes @pytest.mark.req_002). The verifier runs `python -m pytest -m req_002` for each requirement, so a requirement with no tagged test fails verification. Every test file that uses pytest.mark must start with `import pytest`.
 - A test may call only methods and functions that your planned code defines. Before returning JSON, list every method a test calls on a planned class and confirm each one is defined in the planned files. Remove or rename any call you did not define.
 - Only contracts referenced by implementation units are implementation obligations. Unreferenced contracts are context/verification descriptions and must not create extra file changes.
 - Do not invent additional files or units to make coverage appear complete. If the ESpec has an inconsistency, explain it in risks rather than silently changing its scope.
@@ -736,7 +735,8 @@ RULES:
 - Do not claim tests passed; you are only proposing a plan.
 - Verification commands are suggestions only; deterministic checks are added by the orchestrator.
 - Verification commands must run with programs that come with the project's language toolchain (for Python: python, python -m pytest, python -m unittest, python -c). Do not propose a linter or other tool unless the task or constraints name it, because a command that cannot be launched fails verification.
-- When acceptance criteria are supplied, include focused behavioral tests where practical, preferably as workspace-relative test files in this plan.
+- Write test files only when the task, its acceptance criteria, or the Engineering Specification asks for tests; then follow the light-testing rule above (workspace-relative, e.g. tests/test_<module>.py). Your main job is complete, working project code.
+- When the workspace already contains the project, change the existing files to fulfil the request (use modify for existing paths) rather than rebuilding the project.
 - If this plan creates pytest-style test files (test_*.py or *_test.py), suggest the standard pytest command; the verifier will select it only when tests exist after planning.
 - Never claim behavioral correctness based only on syntax compilation.
 - Do not modify unrelated files.

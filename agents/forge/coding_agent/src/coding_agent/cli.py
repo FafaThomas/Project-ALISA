@@ -137,7 +137,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "JSON file of human PASS/FAIL evidence for manual criteria, keyed by criterion ID: "
             '{"VER-001": {"status": "PASS", "evidence": "what you observed"}}. '
-            "Criteria not listed stay unverified. Replaces the interactive prompt."
+            "Criteria not listed stay unverified. Replaces the interactive prompt. "
+            "Only used with --verify spec."
+        ),
+    )
+    run_parser.add_argument(
+        "--verify", choices=("files", "tests", "spec"), default="files",
+        help=(
+            "What must pass for the task to complete. files (default): every planned file is "
+            "written and Python files compile. tests: also the project's own tests pass. "
+            "spec: every Engineering Specification criterion passes. Checks outside the "
+            "chosen level still run and are reported as advisory."
         ),
     )
 
@@ -327,6 +337,7 @@ def _run_coding_task(args: argparse.Namespace) -> int:
         context_engine=context_engine,
         retry_policy=RetryPolicy(max_attempts=args.max_attempts),
         specification_client=planning_client,
+        verification_gate={"spec": "specification"}.get(args.verify, args.verify),
     )
 
     print(f"Task: {task.task_id}")

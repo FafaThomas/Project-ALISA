@@ -108,12 +108,8 @@ class VerificationPlanner:
             if isinstance(scripts.get(name), str) and scripts[name].strip()
         )
 
-    def build(
-        self,
-        changes: Iterable[FileChange],
-        suggested_commands: Iterable[tuple[str, ...]] = (),
-    ) -> tuple[tuple[str, ...], ...]:
-        changes = tuple(changes)
+    def file_check_command(self, changes: Iterable[FileChange]) -> tuple[str, ...]:
+        """The baseline check: every planned file exists (or is deleted) and Python files compile."""
         payload = json.dumps(
             [
                 {"path": change.path.replace("\\", "/"),
@@ -122,14 +118,21 @@ class VerificationPlanner:
             ],
             ensure_ascii=False,
         )
-        baseline = (
+        return (
             "python",
             "-c",
             _FILE_CHECK_SCRIPT,
             str(self.root),
             payload,
         )
-        commands: list[tuple[str, ...]] = [baseline]
+
+    def build(
+        self,
+        changes: Iterable[FileChange],
+        suggested_commands: Iterable[tuple[str, ...]] = (),
+    ) -> tuple[tuple[str, ...], ...]:
+        changes = tuple(changes)
+        commands: list[tuple[str, ...]] = [self.file_check_command(changes)]
         commands.extend(self._node_project_commands())
 
         has_tests = self._has_pytest_tests(changes)

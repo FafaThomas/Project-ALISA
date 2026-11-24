@@ -59,6 +59,8 @@ class OrchestrationError(RuntimeError):
 class TaskOrchestrator:
     """Run approved implementation plans as transactional task executions."""
 
+    VERIFICATION_GATES = frozenset({"files", "tests", "specification"})
+
     def __init__(
         self,
         planner: CodingPlanner,
@@ -70,8 +72,21 @@ class TaskOrchestrator:
         task_journal: TaskEventJournal | None = None,
         max_planning_corrections: int = 2,
         specification_client=None,
+        verification_gate: str = "specification",
     ) -> None:
         self.planner = planner
+        # What decides whether a task completes:
+        #   "files": every planned file was written and Python files compile.
+        #   "tests": "files" plus the project's own tests (and declared project
+        #            scripts) pass.
+        #   "specification": every Engineering Specification criterion passes.
+        # Checks outside the gate still run and are reported as advisory.
+        if verification_gate not in self.VERIFICATION_GATES:
+            raise ValueError(
+                f"verification_gate must be one of {sorted(self.VERIFICATION_GATES)}"
+            )
+        self.verification_gate = verification_gate
+        self.strict_specification = verification_gate == "specification"
         # The architect model creates the staged Engineering Specification.
         # Keep the planner's own client as a backwards-compatible fallback for
         # callers that have not configured separate model roles.
@@ -1033,11 +1048,29 @@ class TaskOrchestrator:
 
             command_results.append(result)
 
-        # 7. Evaluate project-level verification results.
+        # 7. Evaluate project-level verification results. In advisory mode only
+        # the core checks gate: the deterministic set the verification planner
+        # builds without model suggestions (file/syntax check, the project's
+        # own tests, declared project scripts). Specification and model-
+        # suggested commands still ran above and are reported below.
+        gating_commands = tuple(plan.verification_commands)
+        gating_results = list(command_results)
+        if not self.strict_specification:
+            verification_planner = VerificationPlanner(self.coordinator.workspace.root)
+            if self.verification_gate == "files":
+                core_commands = {verification_planner.file_check_command(plan.changes)}
+            else:
+                core_commands = set(verification_planner.build(plan.changes, ()))
+            gating_commands = tuple(
+                command for command in plan.verification_commands if tuple(command) in core_commands
+            )
+            gating_results = [
+                result for result in command_results if tuple(result.command) in core_commands
+            ]
         try:
             report: VerificationReport = self.verification_engine.evaluate(
-                plan.verification_commands,
-                command_results,
+                gating_commands,
+                gating_results,
             )
         except Exception as exc:
             errors.append(f"Verification evaluation failed: {exc}")
@@ -1045,6 +1078,18 @@ class TaskOrchestrator:
 
         if report is not None:
             notes.append(report.summary)
+        if not self.strict_specification:
+            gating_set = {tuple(command) for command in gating_commands}
+            for result in command_results:
+                if tuple(result.command) in gating_set or result.succeeded:
+                    continue
+                label = " ".join(result.command)
+                if len(label) > 120:
+                    label = label[:120] + " ..."
+                status = "timed out" if result.timed_out else (
+                    "could not start" if result.exit_code is None else f"exit {result.exit_code}"
+                )
+                notes.append(f"Advisory check failed (not gating): {label} ({status})")
 
         specification_report = None
         if specification is not None:
@@ -1062,7 +1107,13 @@ class TaskOrchestrator:
                     and item.status.value == "FAIL"
                     for item in specification_report.criteria
                 )
-                if manual_criteria and manual_verification_handler is not None and not automated_failure:
+                # Human evidence is only requested when the specification gates.
+                if (
+                    self.strict_specification
+                    and manual_criteria
+                    and manual_verification_handler is not None
+                    and not automated_failure
+                ):
                     try:
                         manual_evidence = manual_verification_handler(manual_criteria)
                     except Exception as exc:
@@ -1080,7 +1131,15 @@ class TaskOrchestrator:
                     )
                     if warning:
                         notes.append(warning)
-                notes.append(specification_report.summary)
+                if self.strict_specification:
+                    notes.append(specification_report.summary)
+                else:
+                    notes.append("Specification checks (advisory, not gating): " + specification_report.summary)
+                    notes.extend(
+                        f"Advisory: {item.criterion_id} {item.status.value} — {item.reason}"
+                        for item in specification_report.criteria
+                        if item.required and item.status.value == "FAIL"
+                    )
                 journal_warning = self._record_task_event(
                     task.task_id,
                     "specification_verification_completed",
@@ -1092,12 +1151,13 @@ class TaskOrchestrator:
             except Exception as exc:
                 errors.append(f"Specification verification evaluation failed: {exc}")
 
+        specification_gates = self.strict_specification and specification is not None
         if (report is None or not report.passed
-                or (specification is not None and
+                or (specification_gates and
                     (specification_report is None or not specification_report.passed))):
             if report is not None:
                 errors.extend(issue.message for issue in report.issues)
-            if specification is not None and specification_report is not None and not specification_report.passed:
+            if specification_gates and specification_report is not None and not specification_report.passed:
                 errors.append(specification_report.summary)
                 errors.extend(
                     f"Required criterion {item.criterion_id}: {item.status.value} — {item.reason}"
@@ -1115,7 +1175,9 @@ class TaskOrchestrator:
                 task_id=task.task_id,
                 status=TaskStatus.FAILED,
                 changed_files=self._changed_files(coordinated_changes),
-                command_results=tuple(command_results),
+                # Retry feedback and retry decisions use these results, so in
+                # advisory mode they hold only the gating (core) checks.
+                command_results=tuple(gating_results),
                 errors=tuple(errors),
                 notes=tuple(notes),
                 plan_summary=plan.summary,

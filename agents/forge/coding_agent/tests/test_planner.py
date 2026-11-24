@@ -77,7 +77,7 @@ def test_planner_keeps_real_multiline_content_unchanged():
     assert plan.changes[0].content == source
 
 
-def test_planner_requests_behavioral_tests_for_acceptance_criteria():
+def test_planner_requests_light_unit_tests():
     client = FakeClient(_response("VALUE = 1\n"))
     task = CodingTask(
         task_id="task-acceptance",
@@ -88,7 +88,11 @@ def test_planner_requests_behavioral_tests_for_acceptance_criteria():
 
     CodingPlanner(client).plan(task)
 
-    assert "include focused behavioral tests" in client.prompt
+    # Light unit tests that show each component runs; no requirement tagging.
+    assert "Write test files only when the task" in client.prompt
+    assert "When tests are written, keep them light" in client.prompt
+    assert "change the existing files to fulfil the request" in client.prompt
+    assert "pytest.mark.req_" not in client.prompt
     assert "Never claim behavioral correctness based only on syntax compilation" in client.prompt
 
 
