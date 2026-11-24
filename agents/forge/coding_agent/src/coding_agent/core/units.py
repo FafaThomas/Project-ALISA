@@ -56,6 +56,7 @@ from .models import (
 from .registry import PHASES, RoleSpec, Tree, UnitSpec
 from .selection import division_needs_lead, score_units
 from .specialist import Specialist
+from . import testrun
 from .verification import verify_files
 from .workspace import ChangeSet, Workspace, WorkspaceError
 
@@ -116,6 +117,9 @@ class Session:
     findings: list[Finding] = field(default_factory=list)
     builders_ran: bool = False
     verification: VerificationResult | None = None
+    test_commands: list[dict[str, str]] | None = None
+    test_results: list = field(default_factory=list)
+    test_warnings: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.changes = ChangeSet(self.workspace)
@@ -489,12 +493,39 @@ def _active(session: Session, members: list[RoleSpec], phase: str) -> bool:
     return any(m.phase == phase and m.id != lead and m.kind != "coordinator" for m in members)
 
 
+def _check(session: Session, repairer: UnitSpec | None, test_mode: str) -> VerificationResult:
+    """Files gate, then (when it passes) the Debugging Specialist's test run."""
+    verification = verify_files(session.changes, session.work_items)
+    session.emit({"event": "verification", "passed": verification.passed, "problems": verification.problems})
+    if not verification.passed or test_mode == "off" or repairer is None or not testrun.has_python(session.changes):
+        return verification
+    if session.test_commands is None:
+        session.emit({"event": "role_started", "division": repairer.division, "role": repairer.id,
+                      "phase": "test-plan"})
+        commands, output = session.specialist(repairer).plan_test_run(session.request, session.changes)
+        session.record(output, repairer.division)
+        session.test_commands = commands or testrun.fallback_commands(session.changes)
+    if not session.test_commands:
+        return verification
+    seconds = testrun.timeout()
+    results = testrun.run_commands(session.changes, session.test_commands, seconds)
+    session.test_results = results
+    problems = testrun.problems_from(results, session.changes, seconds)
+    failed = sum(r.failed for r in results)
+    skipped = sum(bool(r.skipped) for r in results)
+    verification.checks.append(f"test run: {len(results)} command(s), {failed} failed, {skipped} skipped")
+    session.emit({"event": "test_run", "results": [r.to_dict() for r in results]})
+    verification.problems += problems
+    verification.passed = not verification.problems
+    return verification
+
+
 def verify_and_repair(session: Session, max_repairs: int) -> None:
     if not session.builders_ran and not len(session.changes):
         return
-    verification = verify_files(session.changes, session.work_items)
-    session.emit({"event": "verification", "passed": verification.passed, "problems": verification.problems})
     repairer = session.tree.by_id.get(REPAIRER)
+    test_mode = testrun.mode()
+    verification = _check(session, repairer, test_mode)
     attempt = 0
     while not verification.passed and attempt < max_repairs and repairer is not None:
         attempt += 1
@@ -503,9 +534,15 @@ def verify_and_repair(session: Session, max_repairs: int) -> None:
         output = session.executor(repairer).repair(
             session.request, verification.problems, session.changes, session.board)
         session.record(output, repairer.division)
-        verification = verify_files(session.changes, session.work_items)
+        verification = _check(session, repairer, test_mode)
         verification.checks.append(f"after repair attempt {attempt}")
-        session.emit({"event": "verification", "passed": verification.passed, "problems": verification.problems})
+    if test_mode != "block":
+        # Test-run failures left after repairs are reported, not blocking: a planned command can be wrong too.
+        leftover = [p for p in verification.problems if p["check"] == "test-run"]
+        if leftover:
+            verification.problems = [p for p in verification.problems if p["check"] != "test-run"]
+            verification.passed = not verification.problems
+            session.test_warnings = [f"test run: {p['detail'].splitlines()[0]} (in {p['path']})" for p in leftover]
     session.verification = verification
 
 
@@ -522,6 +559,8 @@ def finish(session: Session, report: RunReport, *, remember: bool) -> RunReport:
     report.warnings = [f"{o.role} ({o.phase}) failed: {o.error[:200]}" for o in failed]
     report.warnings += [f"{o.role} ({o.phase}): {c}" for o in session.outputs for c in o.concerns
                         if c.startswith("rejected file")]
+    report.warnings += session.test_warnings
+    report.test_run = [r.to_dict() for r in session.test_results]
     # A specialist whose model failed may still deliver (e.g. a reviewer's deterministic tools).
     empty = [o for o in failed if not (o.changes or o.findings or o.work_items or o.decisions)]
     everyone_failed = bool(session.outputs) and len(empty) == len(session.outputs)

@@ -73,6 +73,33 @@ FINDINGS_SCHEMA: dict[str, Any] = {
     "required": ["summary", "findings"],
 }
 
+TEST_PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": _STR,
+        "commands": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"command": _STR, "purpose": _STR},
+                "required": ["command", "purpose"],
+            },
+        },
+    },
+    "required": ["summary", "commands"],
+}
+
+TEST_PLAN_INSTRUCTIONS = (
+    "Plan a short test run of the program the team just wrote. List up to 8 shell-free commands, each "
+    "'python <project file> <args>' or 'python -m <project module> <args>', run in order from the project root in a "
+    "throwaway copy (files the program writes persist between commands). Exercise every feature the task asked "
+    "for, the way a user would, including one realistic error case. Commands must finish in a few seconds without "
+    "keyboard input or network access. Use only arguments the code actually accepts; read the entry point's "
+    "argument parsing first. Use concrete values only, never placeholders such as <id>: if a command needs a "
+    "value the program generates at run time (a random ID, for example), leave that command out. Do not write "
+    "tests or files yourself."
+)
+
 TEAM_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {"rationale": _STR, "team": _STR_LIST},
@@ -139,7 +166,7 @@ _LEAD_INSTRUCTIONS = (
 )
 
 
-def system_prompt(role: RoleSpec, tree: Tree, *, as_lead: bool = False) -> str:
+def system_prompt(role: RoleSpec, tree: Tree, *, as_lead: bool = False, instructions: str | None = None) -> str:
     division = tree.division_of(role)
     team = tree.team_of(role)
     where = f"{division.name} division" if division else "coding agent"
@@ -151,7 +178,7 @@ def system_prompt(role: RoleSpec, tree: Tree, *, as_lead: bool = False) -> str:
     parts = [
         f"You are the {role.name} on ALISA Forge's software engineering team "
         f"({where}). Your responsibility: {role.responsibility}.",
-        lead_note if as_lead else _KIND_INSTRUCTIONS[role.kind],
+        instructions or (lead_note if as_lead else _KIND_INSTRUCTIONS[role.kind]),
     ]
     if role.instructions:
         parts.append(role.instructions)

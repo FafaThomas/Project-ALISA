@@ -197,6 +197,8 @@ class RunReport:
     error: str = ""
     # Specialists that failed while the run as a whole could continue.
     warnings: list[str] = field(default_factory=list)
+    # The Debugging Specialist's test run (last round): command, exit code, hang, output tails.
+    test_run: list[dict[str, Any]] = field(default_factory=list)
     artifacts_dir: str = ""
 
     def to_dict(self) -> dict[str, Any]:

@@ -26,7 +26,9 @@ from .context.base import ContextProvider
 from .hooks import load_hooks
 from .llm import LLMError, ModelRouter
 from .models import CodingRequest, FileChange, Finding, RoleOutput, WorkItem
-from .prompts import SCHEMA_BY_KIND, WORK_ITEMS_SCHEMA, system_prompt
+from .prompts import (
+    SCHEMA_BY_KIND, TEST_PLAN_INSTRUCTIONS, TEST_PLAN_SCHEMA, WORK_ITEMS_SCHEMA, system_prompt,
+)
 from .pyinterface import signatures
 from .registry import RoleSpec, Tree
 from .workspace import ChangeSet, WorkspaceError
@@ -148,6 +150,7 @@ class Specialist:
     def _ask(
         self, request: CodingRequest, sections: list[str], *, query: str,
         focus_files: list[str] | None = None, reader=None, as_lead: bool = False,
+        schema_override: dict[str, Any] | None = None, instructions: str | None = None,
     ) -> dict[str, Any]:
         fixed_parts = [request_md(request), unit_context_md(self.role, self.tree), *sections]
         for extra in self._extensions("extra_context") if self.workspace_root is not None else []:
@@ -162,7 +165,7 @@ class Specialist:
         bundle = self.provider.gather(query, self.role, focus_files=focus_files, reader=reader)
         budget = max(2000, self.prompt_budget - len(fixed))
         prompt = f"{fixed}\n\n## Context ({bundle.strategy})\n{bundle.render(budget)}"
-        schema = WORK_ITEMS_SCHEMA if as_lead else SCHEMA_BY_KIND[self.role.kind]
+        schema = schema_override or (WORK_ITEMS_SCHEMA if as_lead else SCHEMA_BY_KIND[self.role.kind])
         model, model_source = self.tree.effective_model(self.role)
         tier = "planning" if as_lead else self.role.tier
         client, source = self.router.resolve(tier, model, model_source)
@@ -170,8 +173,8 @@ class Specialist:
         think, _ = self.tree.effective_think(self.role)
         temperature, _ = self.tree.effective_temperature(self.role)
         self.last_tokens = {}
-        reply = client.generate_json(system_prompt(self.role, self.tree, as_lead=as_lead), prompt, schema=schema,
-                                     think=think, temperature=temperature)
+        system = system_prompt(self.role, self.tree, as_lead=as_lead, instructions=instructions)
+        reply = client.generate_json(system, prompt, schema=schema, think=think, temperature=temperature)
         self.last_tokens = dict(getattr(client, "last_usage", {}) or {})
         used = getattr(client, "used_model", None)
         if used and used != client.model:  # a hosted model was unavailable and a local one answered
@@ -336,6 +339,26 @@ class Specialist:
                 continue
             output.changes.append(change)
         return output
+
+    def plan_test_run(self, request: CodingRequest, changes: ChangeSet) -> tuple[list[dict[str, str]], RoleOutput]:
+        """Commands that exercise the program the team wrote (run by core/testrun.py)."""
+        entry_points = [p for p in changes.paths()
+                        if p.endswith(".py") and "__main__" in (changes.current(p) or "")][:2]
+        sections = [
+            "## Project files written this run\n" + produced_interfaces(changes, exclude=set(), budget=6000),
+            "## Entry points (full content below): " + (", ".join(entry_points) or "none found"),
+        ]
+        try:
+            reply = self._ask(request, sections, query=request.task, focus_files=entry_points,
+                              reader=changes.current, schema_override=TEST_PLAN_SCHEMA,
+                              instructions=TEST_PLAN_INSTRUCTIONS)
+        except LLMError as exc:
+            return [], self._failed("test-plan", exc)
+        commands = [{"command": str(c.get("command", "")).strip(), "purpose": str(c.get("purpose", "")).strip()}
+                    for c in reply.get("commands") or [] if isinstance(c, dict) and str(c.get("command", "")).strip()]
+        output = self._output("test-plan", reply)
+        output.decisions = [f"{c['command']}  ({c['purpose']})" for c in commands]
+        return commands, output
 
     # ------------------------------------------------- public actions (+ hooks)
     def consult(self, request: CodingRequest, board: Blackboard) -> RoleOutput:

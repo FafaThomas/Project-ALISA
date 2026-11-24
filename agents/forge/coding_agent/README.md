@@ -375,9 +375,27 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
   - JSON parses
   - every `from x import name` between the project's own modules finds `name`
 
-  It never runs the generated code, so whether the code behaves correctly
-  stays with your own testing. If the gate fails, the Debugging Specialist gets up to 2 repair rounds. If it
-  still fails, nothing is written, and proposals are kept under `.coding-agent/runs/<run_id>/proposed/`.
+  If the gate fails, the Debugging Specialist gets up to 2 repair rounds. If it still fails, nothing is
+  written, and proposals are kept under `.coding-agent/runs/<run_id>/proposed/`.
+- **The Debugging Specialist's test run** (Python projects).
+  - **What it runs:** once the gate passes, the Debugging Specialist plans up to 8 commands that
+    exercise what the request asked for, such as `python main.py add 12.50 food`, then `list`.
+  - **Where:** they run in a throwaway copy of the project, never in the workspace.
+  - **Failures:** a command that hangs (`CODING_AGENT_TEST_TIMEOUT`, default 20 s) or ends in a
+    Python traceback goes back for repair, like a gate failure. A program that exits with its own
+    error message is not a failure.
+  - **Safety limits:**
+    - Only `python <project file>` and `python -m <project module>` commands run, with no shell.
+    - Commands with `<placeholders>` are skipped.
+    - stdin is closed.
+    - No API keys or tokens are passed in.
+    - Home and temp folders point inside the copy, which is deleted afterwards.
+  - **After repairs:** failures that are still there become warnings and the files are still
+    written, because a planned command can itself be wrong. Set `CODING_AGENT_TEST_RUN=block` to
+    refuse writing instead, or `off` to skip the test run.
+  - **In the report:** `report.json` keeps every command's exit code and output tails.
+  - **What it doesn't replace:** this makes the agent execute the code it generated. It catches
+    hangs and crashes; whether the program does the right thing is still up to your own testing.
 - **Review findings** are advisory. `--fix-review` sends high and critical findings back for one round.
 - **Failures are visible.**
   - A run where every specialist failed, and nothing was delivered, reports `failed` with the reasons.
@@ -427,6 +445,7 @@ coding-agent serve --allow-root D:\work --unit postgres_developer --port 8801
 | `FORGE_CODING_AGENT_*_THINK`, `FORGE_CODING_AGENT_*_TEMPERATURE`, `CODING_AGENT_TEMPERATURE` | thinking and temperature per unit (see Thinking and temperature) |
 | `CODING_AGENT_LLM_TIMEOUT`, `CODING_AGENT_OLLAMA_NUM_PREDICT`, `CODING_AGENT_OLLAMA_NUM_CTX` | Ollama request limits |
 | `CODING_AGENT_TARGET_ENVIRONMENT` | OS and Python the generated code must run on (default: this machine) |
+| `CODING_AGENT_TEST_RUN`, `CODING_AGENT_TEST_TIMEOUT` | Debugging Specialist test run: `repair` (default), `block` or `off`; seconds per command (default 20) |
 | `GEMINI_API_KEY`, `GEMINI_API_BASE` | Gemini access (only needed when a unit uses `gemini:`) |
 | `FORGE_GEMINI_<NAME>_MODEL` | named Gemini models, used as `gemini:@<name>` |
 | `GEMINI_QUOTA_<MODEL>` | `rpm,tpm,rpd` limits for quota-aware routing |

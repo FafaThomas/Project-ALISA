@@ -97,3 +97,5 @@ def isolated_model_env(monkeypatch, tmp_path):
         if name.startswith(("FORGE_", "GEMINI_")) or "OLLAMA" in name:
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GEMINI_USAGE_FILE", str(tmp_path / "gemini_usage.json"))
+    # Tests that exercise the Debugging Specialist's test run turn it on explicitly.
+    monkeypatch.setenv("CODING_AGENT_TEST_RUN", "off")
