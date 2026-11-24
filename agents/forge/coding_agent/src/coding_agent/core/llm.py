@@ -8,16 +8,23 @@ model when the tier's model changes, to keep VRAM free on single-GPU hosts.
 Environment (read from the process or the ALISA project ``.env``):
 
 - ``OLLAMA_HOST``                      Ollama URL (default http://localhost:11434)
-- ``PLANNING_OLLAMA_MODEL``            planning tier
-- ``CODING_AGENT_OLLAMA_MODEL``        coding tier
-- ``REVIEW_OLLAMA_MODEL``              review tier (falls back to planning)
+- ``FORGE_CODING_AGENT_PLANNING_MODEL`` planning tier  (older name: PLANNING_OLLAMA_MODEL)
+- ``FORGE_CODING_AGENT_CODING_MODEL``   coding tier    (older name: CODING_AGENT_OLLAMA_MODEL)
+- ``FORGE_CODING_AGENT_REVIEW_MODEL``   review tier, falls back to planning (older: REVIEW_OLLAMA_MODEL)
 - ``OLLAMA_MODEL``                     shared fallback for every tier
 - ``CODING_AGENT_LLM_TIMEOUT``         seconds per request (default 300)
 - ``CODING_AGENT_OLLAMA_NUM_PREDICT``  output token cap (default 8192)
 - ``CODING_AGENT_OLLAMA_NUM_CTX``      context window (default 16384)
 
-A unit can name its own model with ``model:`` in its ``unit.md``; units under
-it inherit that model. Units with no declared model use the tier settings above.
+Models are looked up from the unit upward (unit, its team, its division, the
+agent). At each level the ``.env`` variable named after the unit's place in
+the hierarchy is checked first, then ``model:`` in its ``unit.md``:
+
+    FORGE_CODING_AGENT_MODEL                                 the whole agent
+    FORGE_CODING_AGENT_DEVELOPMENT_MODEL                     a division
+    FORGE_CODING_AGENT_DEVELOPMENT_PYTHON_DEVELOPER_MODEL    a specialist
+
+The first one found wins. Units with none use the tier defaults above.
 """
 
 from __future__ import annotations
@@ -31,16 +38,21 @@ from typing import Any, Callable, Mapping, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from .env import env_value, load_local_env
+
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 300.0
 DEFAULT_NUM_PREDICT = 8192
 DEFAULT_NUM_CTX = 16384
 
+# Tier defaults, most preferred first. The FORGE_CODING_AGENT_* names are the
+# organized .env layout; the older names are still read as fallbacks.
 _TIER_ENV: dict[str, tuple[str, ...]] = {
-    "planning": ("PLANNING_OLLAMA_MODEL", "OLLAMA_MODEL", "CODING_AGENT_OLLAMA_MODEL"),
-    "coding": ("CODING_AGENT_OLLAMA_MODEL", "OLLAMA_MODEL"),
-    "review": ("REVIEW_OLLAMA_MODEL", "PLANNING_OLLAMA_MODEL", "OLLAMA_MODEL", "CODING_AGENT_OLLAMA_MODEL"),
+    "planning": ("FORGE_CODING_AGENT_PLANNING_MODEL", "PLANNING_OLLAMA_MODEL", "OLLAMA_MODEL"),
+    "coding": ("FORGE_CODING_AGENT_CODING_MODEL", "CODING_AGENT_OLLAMA_MODEL", "OLLAMA_MODEL"),
+    "review": ("FORGE_CODING_AGENT_REVIEW_MODEL", "REVIEW_OLLAMA_MODEL",
+               "FORGE_CODING_AGENT_PLANNING_MODEL", "PLANNING_OLLAMA_MODEL", "OLLAMA_MODEL"),
 }
 
 
@@ -52,34 +64,13 @@ class LLMClient(Protocol):
     model: str
 
     def generate_json(
-        self, system: str, prompt: str, *, schema: Mapping[str, Any] | None = None
+        self, system: str, prompt: str, *, schema: Mapping[str, Any] | None = None,
+        think: bool | None = None, temperature: float | None = None,
     ) -> dict[str, Any]: ...
 
     def unload(self) -> bool: ...
 
 
-def _find_project_env() -> Path | None:
-    """Locate the ALISA project .env by walking up from this file."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "README.MD").is_file() and (parent / "agents").is_dir():
-            env = parent / ".env"
-            return env if env.is_file() else None
-    return None
-
-
-def load_local_env() -> None:
-    """Load project .env values without overriding the existing environment."""
-    env_path = _find_project_env()
-    if env_path is None:
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if key:
-            os.environ.setdefault(key, value.strip().strip("'\""))
 
 
 def _positive_env(name: str, default: float, cast: type) -> Any:
@@ -98,7 +89,7 @@ def _positive_env(name: str, default: float, cast: type) -> Any:
 def model_for_tier(tier: str) -> str | None:
     load_local_env()
     for name in _TIER_ENV.get(tier, ("OLLAMA_MODEL",)):
-        value = os.getenv(name)
+        value = env_value(name)
         if value:
             return value
     return None
@@ -143,8 +134,16 @@ class OllamaClient:
         return True
 
     def generate_json(
-        self, system: str, prompt: str, *, schema: Mapping[str, Any] | None = None
+        self, system: str, prompt: str, *, schema: Mapping[str, Any] | None = None,
+        think: bool | None = None, temperature: float | None = None,
     ) -> dict[str, Any]:
+        """One structured reply.
+
+        ``think``: False stops thinking models (qwen3, deepseek-r1, ...) from
+        reasoning before they answer, which is slower and can use up the
+        output budget before the JSON is written. None leaves Ollama's default.
+        ``temperature``: sampling temperature; None leaves Ollama's default.
+        """
         if not prompt.strip():
             raise ValueError("prompt must not be empty")
         payload = {
@@ -157,6 +156,10 @@ class OllamaClient:
             "stream": True,
             "options": {"num_predict": self.num_predict, "num_ctx": self.num_ctx},
         }
+        if think is not None:
+            payload["think"] = think
+        if temperature is not None:
+            payload["options"]["temperature"] = temperature
         started = time.monotonic()
         parts: list[str] = []
         final: dict[str, Any] = {}
@@ -256,24 +259,25 @@ class ModelRouter:
         return client
 
     def resolve(
-        self, tier: str, model: str | None = None, declared_by: str | None = None,
+        self, tier: str, model: str | None = None, source: str | None = None,
     ) -> tuple[LLMClient, str]:
-        """(client, source). ``model`` is a unit's declared model, if any."""
+        """(client, source). ``model``/``source`` come from ``Tree.effective_model`` when the
+        unit (or a unit above it) has its own model; otherwise the tier default is used."""
         if self._fixed is not None:
             return self._fixed, "fixed client"
         if model:
-            client, source = self._model_client(model), f"unit.md ({declared_by or 'unit'})"
+            client, source = self._model_client(model), source or "unit model"
         else:
             client = self._clients.get(tier)
             if client is None:
                 load_local_env()
-                env_name = next((n for n in _TIER_ENV.get(tier, ()) if os.getenv(n)), None)
+                env_name = next((n for n in _TIER_ENV.get(tier, ()) if env_value(n)), None)
                 if env_name is None:
                     raise LLMError(
                         f"No model configured for the {tier} tier. Set {_TIER_ENV[tier][0]} or OLLAMA_MODEL, "
-                        "or declare a model in the unit's unit.md."
+                        "or give the unit a model in .env or its unit.md."
                     )
-                client = self._clients[tier] = self._model_client(os.environ[env_name])
+                client = self._clients[tier] = self._model_client(env_value(env_name))  # type: ignore[arg-type]
                 self._env_source[tier] = f".env {env_name}"
             source = self._env_source.get(tier, f"{tier} tier client")
         if (

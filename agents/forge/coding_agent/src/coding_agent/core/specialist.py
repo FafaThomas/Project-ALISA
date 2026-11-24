@@ -136,11 +136,14 @@ class Specialist:
         budget = max(2000, self.prompt_budget - len(fixed))
         prompt = f"{fixed}\n\n## Context ({bundle.strategy})\n{bundle.render(budget)}"
         schema = WORK_ITEMS_SCHEMA if as_lead else SCHEMA_BY_KIND[self.role.kind]
-        model, declared_by = self.tree.effective_model(self.role)
+        model, model_source = self.tree.effective_model(self.role)
         tier = "planning" if as_lead else self.role.tier
-        client, source = self.router.resolve(tier, model, declared_by)
+        client, source = self.router.resolve(tier, model, model_source)
         self.last_model, self.last_model_source = client.model, source
-        return client.generate_json(system_prompt(self.role, self.tree, as_lead=as_lead), prompt, schema=schema)
+        think, _ = self.tree.effective_think(self.role)
+        temperature, _ = self.tree.effective_temperature(self.role)
+        return client.generate_json(system_prompt(self.role, self.tree, as_lead=as_lead), prompt, schema=schema,
+                                    think=think, temperature=temperature)
 
     def _output(self, phase: str, reply: dict[str, Any]) -> RoleOutput:
         return RoleOutput(

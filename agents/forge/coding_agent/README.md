@@ -90,23 +90,58 @@ stop loading:
 
 ## Models
 
-There are two layers, each with its own job:
-
-| Where | Decides |
-|---|---|
-| `.env` | the default per tier: `PLANNING_OLLAMA_MODEL` (Director, analysts, planners, designers, leads), `CODING_AGENT_OLLAMA_MODEL` (builders), `REVIEW_OLLAMA_MODEL` (reviewers), `OLLAMA_MODEL` (fallback) |
-| `unit.md` `model:` | an exception for one unit; units under it inherit it |
-
-If the unit or any unit above it declares a `model`, that model is used.
-Otherwise the unit's `.env` tier applies. Every output in a report records the
-model used and where the choice came from. For example:
+Models are set in the ALISA `.env`, which is organized as faction > agent >
+division. A specialist can also set its own `model:` in its `unit.md`.
 
 ```
-qwen3:8b            .env PLANNING_OLLAMA_MODEL
+OLLAMA_HOST, OLLAMA_MODEL                    shared by all factions; OLLAMA_MODEL is the last resort
+FORGE_CODING_AGENT_PLANNING_MODEL            role-type default: Director, analysts, planners, designers, leads
+FORGE_CODING_AGENT_CODING_MODEL              role-type default: developers, builders, Debugging Specialist
+FORGE_CODING_AGENT_REVIEW_MODEL              role-type default: reviewers (blank: planning model)
+FORGE_CODING_AGENT_MODEL                     the whole agent
+FORGE_CODING_AGENT_<DIVISION>_MODEL          one division, e.g. FORGE_CODING_AGENT_DEVELOPMENT_MODEL
+FORGE_CODING_AGENT_<DIVISION>_<UNIT>_MODEL   one specialist, e.g. ..._DEVELOPMENT_PYTHON_DEVELOPER_MODEL
+```
+
+For each unit, the lookup starts at the unit and walks up: the unit itself,
+its team, its division, then the agent. At each level the `.env` variable is
+checked first, then `model:` in that unit's `unit.md`, and the first one set
+wins. If none is set, the unit's role-type default applies, then
+`OLLAMA_MODEL`. Blank values count as unset.
+
+A division model applies to every unit in it, the division lead included. For
+example, setting `FORGE_CODING_AGENT_DEVELOPMENT_MODEL` also moves the Tech Lead
+to that model. The older names (`PLANNING_OLLAMA_MODEL`,
+`CODING_AGENT_OLLAMA_MODEL`, `REVIEW_OLLAMA_MODEL`) are still read as
+role-type fallbacks.
+
+Every output in a report records the model used and where the choice came
+from. For example:
+
+```
+qwen3:8b            .env FORGE_CODING_AGENT_PLANNING_MODEL
+qwen2.5-coder:14b   .env FORGE_CODING_AGENT_DEVELOPMENT_MODEL
 qwen2.5-coder:14b   unit.md (development/python_developer) via http://127.0.0.1:54510
 ```
 
-`coding-agent units` shows each unit's declared model.
+`coding-agent units --json` shows each unit's `.env` variable name
+(`model_env_var`) and its effective model.
+
+### Thinking and temperature
+
+Two more settings use the same lookup as models: the unit's `.env` variable
+first, then its `unit.md`, walking up to the agent.
+
+| Setting | `.env` example | `unit.md` | Default |
+|---|---|---|---|
+| Thinking | `FORGE_CODING_AGENT_ARCHITECTURE_THINK=true` | `think: true` | off |
+| Temperature | `FORGE_CODING_AGENT_DEVELOPMENT_TEMPERATURE=0` | `temperature: 0.2` | `CODING_AGENT_TEMPERATURE`, else 0.2 |
+
+**Thinking** is off by default. Thinking models such as qwen3 and deepseek-r1
+otherwise reason before answering. In benchmarks on an 11 GB card, this made
+calls 3–5x slower and sometimes used up the whole output budget before any
+JSON was written. Turn it on only for units where the extra reasoning is worth
+the wait. **Temperature** defaults low, so that runs are more repeatable.
 
 ## Using one unit on its own
 
@@ -300,7 +335,7 @@ coding-agent serve --allow-root D:\work --unit postgres_developer --port 8801
 | Variable | Purpose |
 |---|---|
 | `OLLAMA_HOST` | Ollama URL (default `http://localhost:11434`) |
-| `PLANNING_OLLAMA_MODEL`, `CODING_AGENT_OLLAMA_MODEL`, `REVIEW_OLLAMA_MODEL`, `OLLAMA_MODEL` | tier defaults (see Models) |
+| `OLLAMA_MODEL`, `FORGE_CODING_AGENT_*_MODEL` | models per role type, agent, division or specialist (see Models) |
 | `CODING_AGENT_LLM_TIMEOUT`, `CODING_AGENT_OLLAMA_NUM_PREDICT`, `CODING_AGENT_OLLAMA_NUM_CTX` | model request limits |
 | `CODING_AGENT_API_TOKEN` | bearer token for services and for calls to remote units |
 | `CODING_AGENT_REMOTE_TIMEOUT` | seconds to wait for a remote unit (default 3600) |

@@ -128,7 +128,8 @@ def test_tech_lead_assigns_work_to_the_team_as_one_specialist(pkg, tmp_path):
 
 # ------------------------------------------------------------- per-unit models
 def test_each_unit_reports_its_model_and_where_it_came_from(pkg, tmp_path, monkeypatch):
-    monkeypatch.setenv("CODING_AGENT_OLLAMA_MODEL", "env-coder")
+    monkeypatch.setenv("FORGE_CODING_AGENT_CODING_MODEL", "env-coder")
+    monkeypatch.setenv("FORGE_CODING_AGENT_PLANNING_MODEL", "env-planner")
     made = {}
 
     def factory(model):
@@ -146,7 +147,7 @@ def test_each_unit_reports_its_model_and_where_it_came_from(pkg, tmp_path, monke
     merged = report.outputs[0]
     assert "pg-model" in merged.model and "env-coder" in merged.model
     assert "unit.md (development/database_developer/postgres_developer)" in merged.model_source
-    assert ".env CODING_AGENT_OLLAMA_MODEL" in merged.model_source
+    assert ".env FORGE_CODING_AGENT_CODING_MODEL" in merged.model_source
     assert made["pg-model"].roles_called() == ["postgres_developer"]
     assert set(made["env-coder"].roles_called()) >= {"qdrant_developer"}
 

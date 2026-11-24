@@ -27,8 +27,11 @@ plain text otherwise. Keys:
     order               sort order among siblings
     default_members     ids used when a division is called and nothing matches
     attachments         agent only: {"specialist_id": "host_division_id"}
-    model               model for this unit and every unit under it (else the .env tier)
+    model               model for this unit and every unit under it (see effective_model)
+    think               true/false: let "thinking" models reason before answering (default false)
+    temperature         sampling temperature, e.g. 0.2 (default CODING_AGENT_TEMPERATURE or 0.2)
     endpoint            URL of this unit's own HTTP service; parents then call it remotely
+    faction             agent only: the faction it belongs to (prefix of its .env model variables)
 
 The Markdown body is the unit's brief: a division's mission, a specialist's
 instructions (added to its system prompt).
@@ -40,11 +43,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal
+
+from .env import env_value, load_local_env
 
 RoleKind = Literal["analyst", "planner", "designer", "coordinator", "builder", "reviewer", "repairer"]
 ModelTier = Literal["planning", "coding", "review"]
@@ -92,6 +98,9 @@ class UnitSpec:
     model: str | None = None
     endpoint: str | None = None
     division: str = ""           # id of the division this unit sits in ("" for the agent)
+    faction: str = ""            # agent only
+    think: bool | None = None
+    temperature: float | None = None
 
     @property
     def phase(self) -> Phase:
@@ -164,7 +173,7 @@ def parse_front_matter(text: str, source: Path) -> tuple[dict[str, Any], str]:
             raise RegistryError(f"{source}:{number}: expected 'key: value'")
         key, raw = line.split(":", 1)
         raw = raw.strip()
-        if raw[:1] in '[{"' or raw in ("true", "false") or raw.lstrip("-").isdigit():
+        if raw[:1] in '[{"' or raw in ("true", "false") or re.fullmatch(r"-?\d+(\.\d+)?", raw):
             try:
                 data[key.strip()] = json.loads(raw)
             except json.JSONDecodeError as exc:
@@ -271,6 +280,13 @@ class Tree:
             explicit = data.get("explicit_only", False)
             if not isinstance(explicit, bool):
                 raise RegistryError(f"{source}: 'explicit_only' must be true or false")
+            think = data.get("think")
+            if think is not None and not isinstance(think, bool):
+                raise RegistryError(f"{source}: 'think' must be true or false")
+            temperature = data.get("temperature")
+            if temperature is not None and (isinstance(temperature, bool)
+                                            or not isinstance(temperature, (int, float)) or temperature < 0):
+                raise RegistryError(f"{source}: 'temperature' must be a number >= 0")
             endpoint = _str(data, "endpoint", source, required=False)
             if endpoint and not endpoint.startswith(("http://", "https://")):
                 raise RegistryError(f"{source}: 'endpoint' must be an http(s) URL")
@@ -283,6 +299,8 @@ class Tree:
                 requires_explicit_request=explicit, instructions=_strip_title(body), lead=lead, order=order,
                 default_members=defaults, attachments=tuple(attachments.items()),
                 model=_str(data, "model", source, required=False), endpoint=endpoint, division=division,
+                faction=(_str(data, "faction", source, required=False) or "") if depth == 0 else "",
+                think=think, temperature=float(temperature) if temperature is not None else None,
             )
 
         load_unit(package_root, "", 0, None, "")
@@ -350,11 +368,66 @@ class Tree:
     def specialists(self) -> list[UnitSpec]:
         return [u for u in self.units.values() if u.level == "specialist"]
 
-    def effective_model(self, unit: UnitSpec) -> tuple[str | None, str | None]:
-        """(model, path of the unit that declared it), or (None, None) to use the .env tier."""
+    def unit_env_var(self, unit: UnitSpec, setting: str) -> str:
+        """A unit's .env variable, named after its place in the hierarchy:
+        FORGE_CODING_AGENT_<SETTING>, FORGE_CODING_AGENT_DEVELOPMENT_<SETTING>, ..."""
+        root = self.root
+        parts = [root.faction, root.id, *unit.path.split("/")] if unit.path else [root.faction, root.id]
+        name = "_".join(p for p in parts if p)
+        return re.sub(r"[^A-Za-z0-9]+", "_", name).upper() + "_" + setting.upper()
+
+    def model_env_var(self, unit: UnitSpec) -> str:
+        return self.unit_env_var(unit, "MODEL")
+
+    def _lookup(self, unit: UnitSpec, setting: str, attr: str):
+        """First value found walking up from ``unit``: .env variable, then unit.md field."""
+        load_local_env()
         for candidate in [unit, *self.ancestors(unit)]:
+            var = self.unit_env_var(candidate, setting)
+            value = env_value(var)
+            if value is not None:
+                return value, f".env {var}"
+            declared = getattr(candidate, attr)
+            if declared is not None:
+                return declared, f"unit.md ({candidate.path or candidate.id})"
+        return None, None
+
+    def effective_think(self, unit: UnitSpec) -> tuple[bool, str]:
+        """Whether a thinking model may reason before answering. Off unless turned on."""
+        value, source = self._lookup(unit, "THINK", "think")
+        if value is None:
+            return False, "default (off)"
+        if isinstance(value, str):
+            if value.strip().lower() not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
+                raise RegistryError(f"{source}: THINK must be true or false, got {value!r}")
+            value = value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value), source  # type: ignore[return-value]
+
+    def effective_temperature(self, unit: UnitSpec) -> tuple[float, str]:
+        value, source = self._lookup(unit, "TEMPERATURE", "temperature")
+        if value is None:
+            fallback = env_value("CODING_AGENT_TEMPERATURE")
+            value, source = (fallback, ".env CODING_AGENT_TEMPERATURE") if fallback else (0.2, "default")
+        try:
+            return float(value), source  # type: ignore[arg-type]
+        except ValueError as exc:
+            raise RegistryError(f"{source}: temperature must be a number, got {value!r}") from exc
+
+    def effective_model(self, unit: UnitSpec) -> tuple[str | None, str | None]:
+        """(model, where it came from), or (None, None) to use the .env tier default.
+
+        Looks from the unit upward: the unit, its team, its division, the agent.
+        At each level the unit's .env variable is checked first, then ``model:``
+        in its unit.md; the first one set wins.
+        """
+        load_local_env()
+        for candidate in [unit, *self.ancestors(unit)]:
+            var = self.model_env_var(candidate)
+            value = env_value(var)
+            if value:
+                return value, f".env {var}"
             if candidate.model:
-                return candidate.model, candidate.path or candidate.id
+                return candidate.model, f"unit.md ({candidate.path or candidate.id})"
         return None, None
 
     def team_of(self, unit: UnitSpec) -> UnitSpec | None:
@@ -364,12 +437,12 @@ class Tree:
 
     def describe(self, unit: UnitSpec | None = None) -> dict[str, Any]:
         unit = unit or self.root
-        model, declared_by = self.effective_model(unit)
+        model, model_source = self.effective_model(unit)
         data: dict[str, Any] = {
             "id": unit.id, "path": unit.path, "name": unit.name, "level": unit.level,
-            "lead": unit.lead, "model": unit.model,
+            "lead": unit.lead, "model": unit.model, "model_env_var": self.model_env_var(unit),
             "effective_model": model or f".env {unit.tier} tier",
-            "model_declared_by": declared_by, "endpoint": unit.endpoint,
+            "model_source": model_source or f".env {unit.tier} tier default", "endpoint": unit.endpoint,
             "has_tools": unit.has_tools, "has_requirements": unit.requirements_file is not None,
         }
         if unit.level == "specialist":

@@ -26,11 +26,12 @@ class ScriptedLLM:
         self.unloads += 1
         return True
 
-    def generate_json(self, system: str, prompt: str, *, schema=None) -> dict:
+    def generate_json(self, system: str, prompt: str, *, schema=None, think=None, temperature=None) -> dict:
         match = _ROLE_RE.match(system)
         # Units outside the packaged tree (test trees) map "Postgres Developer" -> "postgres_developer".
         role = (_NAME_TO_ID.get(match.group(1)) or match.group(1).lower().replace(" ", "_")) if match else "unknown"
-        self.calls.append({"role": role, "system": system, "prompt": prompt, "schema": schema})
+        self.calls.append({"role": role, "system": system, "prompt": prompt, "schema": schema,
+                           "think": think, "temperature": temperature})
         handler = self.handlers.get(role)
         if handler is None:
             return default_reply(role, prompt, schema)
@@ -82,3 +83,16 @@ def calculator_handlers(builder: str = "python_developer") -> dict[str, Any]:
 @pytest.fixture
 def scripted():
     return ScriptedLLM
+
+
+@pytest.fixture(autouse=True)
+def isolated_model_env(monkeypatch):
+    """Keep the developer's .env and shell model settings out of the tests."""
+    import os
+
+    from coding_agent.core import env
+
+    monkeypatch.setattr(env, "find_project_env", lambda: None)
+    for name in list(os.environ):
+        if name.startswith("FORGE_") or "OLLAMA" in name:
+            monkeypatch.delenv(name, raising=False)

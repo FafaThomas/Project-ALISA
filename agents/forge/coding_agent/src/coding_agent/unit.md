@@ -1,6 +1,7 @@
 ---
 id: coding_agent
 name: Coding Agent
+faction: forge
 lead: engineering_director
 attachments: {"debugging_specialist": "development"}
 ---

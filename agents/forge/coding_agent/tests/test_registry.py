@@ -105,8 +105,9 @@ def test_models_are_inherited_downward(pkg):
     write_unit(db / "qdrant_developer", 'id: qdrant_developer\nname: Qdrant Developer\nkind: builder\n'
                'responsibility: Qdrant')
     tree = Tree.load(pkg)
-    assert tree.effective_model(tree.get("postgres_developer")) == ("pg-model", "development/database_developer/postgres_developer")
-    assert tree.effective_model(tree.get("qdrant_developer")) == ("team-model", "development/database_developer")
+    assert tree.effective_model(tree.get("postgres_developer")) == (
+        "pg-model", "unit.md (development/database_developer/postgres_developer)")
+    assert tree.effective_model(tree.get("qdrant_developer")) == ("team-model", "unit.md (development/database_developer)")
     assert tree.effective_model(tree.get("python_developer")) == (None, None)  # falls back to the .env tier
 
 

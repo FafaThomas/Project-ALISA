@@ -84,3 +84,13 @@ def test_director_failure_falls_back_to_heuristic(scripted):
     request = CodingRequest(task="Build a calculator CLI in Python", workspace="w")
     team = TeamAssembler(ModelRouter.single(llm)).assemble(request, [])
     assert team.rationale.startswith("Keyword and workspace match")
+
+
+def test_director_cannot_add_test_writers_the_request_did_not_ask_for(scripted):
+    llm = scripted({"engineering_director": {"rationale": "add testing", "team": [
+        "python_developer", "unit_testing_engineer", "integration_testing_engineer"]}})
+    request = CodingRequest(task="Build a calculator CLI in Python", workspace="w")
+    team = TeamAssembler(ModelRouter.single(llm)).assemble(request, [])
+    assert "unit_testing_engineer" not in team.ids and "integration_testing_engineer" not in team.ids
+    asked = CodingRequest(task="Build a calculator CLI in Python with unit tests", workspace="w")
+    assert "unit_testing_engineer" in TeamAssembler(ModelRouter.single(llm)).assemble(asked, []).ids

@@ -255,9 +255,11 @@ class TeamAssembler:
             "Keep the suggestion unless a specialist is clearly missing or clearly unnecessary."
         )
         director = self.tree.by_id[self.tree.root.lead]
-        model, declared_by = self.tree.effective_model(director)
-        client, _ = self.router.resolve("planning", model, declared_by)
-        reply = client.generate_json(DIRECTOR_SYSTEM, prompt, schema=TEAM_SCHEMA)
+        model, model_source = self.tree.effective_model(director)
+        client, _ = self.router.resolve("planning", model, model_source)
+        reply = client.generate_json(DIRECTOR_SYSTEM, prompt, schema=TEAM_SCHEMA,
+                                     think=self.tree.effective_think(director)[0],
+                                     temperature=self.tree.effective_temperature(director)[0])
         ids = reply.get("team")
         if not isinstance(ids, list):
             raise ValueError("director reply has no team list")
