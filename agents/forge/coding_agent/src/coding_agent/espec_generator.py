@@ -1356,6 +1356,16 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         self, data, requirements, *, objective="", constraints=(), acceptance_criteria=()
     ):
         modules = self._parse_architecture(data, requirements)
+        # A file listed under several modules is bookkeeping, not a reason to
+        # reject the design: keep it with the first module that lists it.
+        modules, dedupe_repairs = self._dedupe_architecture_paths(modules)
+        if dedupe_repairs:
+            self._write_diagnostic("architecture_path_dedupe.json", dedupe_repairs)
+        # Design-quality findings (combined responsibilities, catch-all modules)
+        # are opinions about structure, not defects that stop code from running.
+        # They are recorded as warnings and never fail the stage. Structural
+        # integrity (unknown module references, dependency cycles) is still
+        # enforced by _parse_architecture above.
         report = ArchitectureDesignValidator().validate(
             modules,
             objective=objective,
@@ -1364,10 +1374,32 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             acceptance_criteria=acceptance_criteria,
         )
         if not report.valid:
-            raise ValueError(
-                "architecture design quality validation failed: " + "; ".join(report.issues)
-            )
+            self._write_diagnostic("architecture_design_warnings.json", {"warnings": list(report.issues)})
         return modules
+
+    @staticmethod
+    def _dedupe_architecture_paths(modules):
+        """Keep each file path only in the first module that lists it."""
+        owners: dict[str, str] = {}
+        repairs = []
+        result = []
+        for module in modules:
+            kept = []
+            for raw_path in module.file_paths:
+                key = PurePosixPath(raw_path.replace("\\", "/")).as_posix().casefold()
+                owner = owners.get(key)
+                if owner is not None and owner != module.module_id:
+                    repairs.append({
+                        "action": "drop_duplicate_architecture_path",
+                        "path": raw_path,
+                        "kept_in": owner,
+                        "removed_from": module.module_id,
+                    })
+                    continue
+                owners.setdefault(key, module.module_id)
+                kept.append(raw_path)
+            result.append(replace(module, file_paths=tuple(kept)))
+        return result, repairs
 
     def _parse_architecture(self, data, requirements=None):
         result = [ArchitectureModule(
@@ -1908,6 +1940,77 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                     "requirement_id": requirement_id,
                 })
 
+        return result, repairs
+
+    @classmethod
+    def _complete_architecture_file_units(cls, units, requirements, architecture_paths):
+        """Add an implementation unit for every architecture file that has none.
+
+        The architecture is the list of files the project consists of. A file
+        listed there without a unit is never planned, so the delivered repo is
+        missing it (the burger shop lost frontend/index.html and src/main.jsx this
+        way). The new unit serves the requirements that name the file, else those
+        of other units in the same folder, else those that name its top folder.
+        """
+        result = list(units)
+        repairs = []
+        covered = {unit.target_path.replace("\\", "/").casefold() for unit in result}
+        existing_ids = {unit.unit_id for unit in result}
+        behavior_ids = [
+            item.requirement_id for item in requirements
+            if item.kind != RequirementKind.CONSTRAINT
+        ]
+        if not behavior_ids:
+            # Only constraints: there is nothing to build, so nothing to complete.
+            return result, repairs
+        requirement_text = {
+            item.requirement_id: " ".join((item.description, *item.acceptance_criteria)).casefold()
+            for item in requirements
+        }
+        extensionless_files = {"dockerfile", "makefile", "procfile", "license", "gemfile", "rakefile"}
+        next_number = 1
+        for raw_path in architecture_paths:
+            path = str(raw_path).replace("\\", "/").strip()
+            name = PurePosixPath(path).name
+            # Skip folder entries ("frontend/", "frontend/src"); only files get units.
+            if (
+                not path or path.endswith("/") or path.casefold() in covered
+                or ("." not in name and name.casefold() not in extensionless_files)
+            ):
+                continue
+            folder = PurePosixPath(path).parent.as_posix()
+            top_folder = path.split("/", 1)[0] if "/" in path else ""
+            satisfies = [rid for rid in behavior_ids if name.casefold() in requirement_text[rid]]
+            if not satisfies:
+                satisfies = list(dict.fromkeys(
+                    rid
+                    for unit in result
+                    if PurePosixPath(unit.target_path.replace("\\", "/")).parent.as_posix() == folder
+                    for rid in unit.satisfies
+                    if rid in behavior_ids
+                ))
+            if not satisfies and top_folder:
+                satisfies = [rid for rid in behavior_ids if top_folder.casefold() in requirement_text[rid]]
+            while f"UNIT-ARCH-{next_number:03d}" in existing_ids:
+                next_number += 1
+            unit_id = f"UNIT-ARCH-{next_number:03d}"
+            existing_ids.add(unit_id)
+            covered.add(path.casefold())
+            result.append(ImplementationUnit(
+                unit_id=unit_id,
+                title=f"Create {name}",
+                target_path=path,
+                kind=cls._unit_kind_for_required_path(path),
+                satisfies=tuple(dict.fromkeys(satisfies)),
+                acceptance_criteria=(f"{path} exists and is complete for its role in the project.",),
+            ))
+            repairs.append({
+                "action": "add_unit_for_architecture_file",
+                "unit_id": unit_id,
+                "target_path": path,
+                "satisfies": list(dict.fromkeys(satisfies)),
+                "reason": "the architecture lists this file but no implementation unit wrote it",
+            })
         return result, repairs
 
     @classmethod
@@ -2781,6 +2884,12 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             completion_repairs["implementation_units"].extend(
                 cross_cutting_repairs
             )
+            # Every file the architecture lists must be written; a file without an
+            # implementation unit would otherwise be silently skipped by the planner.
+            units, architecture_file_repairs = self._complete_architecture_file_units(
+                units, requirements, architecture_paths
+            )
+            completion_repairs["implementation_units"].extend(architecture_file_repairs)
             units, verification, normalization_repairs = (
                 self._normalize_implementation_units(
                     units, verification, requirements, contracts or ()

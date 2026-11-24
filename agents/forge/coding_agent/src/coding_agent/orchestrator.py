@@ -1025,8 +1025,30 @@ class TaskOrchestrator:
                     notes=tuple(notes),
                 )
 
-        # 6. Execute the exact commands that were included in the approved plan.
-        for command in plan.verification_commands:
+        # 6. Execute the approved commands. The core (gating) set is the
+        # deterministic one the verification planner builds without model
+        # suggestions. With the "files" gate only that set runs: model-suggested
+        # and specification commands decide nothing there, and running them can
+        # create stray files or start servers.
+        core_commands: set | None = None
+        if not self.strict_specification:
+            verification_planner = VerificationPlanner(self.coordinator.workspace.root)
+            if self.verification_gate == "files":
+                core_commands = {verification_planner.file_check_command(plan.changes)}
+            else:
+                core_commands = set(verification_planner.build(plan.changes, ()))
+        commands_to_run = tuple(plan.verification_commands)
+        if self.verification_gate == "files":
+            commands_to_run = tuple(
+                command for command in plan.verification_commands if tuple(command) in core_commands
+            )
+            skipped = len(plan.verification_commands) - len(commands_to_run)
+            if skipped:
+                notes.append(
+                    f"Skipped {skipped} advisory command(s) (gate: files). "
+                    "Use --verify tests or --verify spec to run them."
+                )
+        for command in commands_to_run:
             try:
                 result = self.command_runner.run(
                     command,
@@ -1055,12 +1077,7 @@ class TaskOrchestrator:
         # suggested commands still ran above and are reported below.
         gating_commands = tuple(plan.verification_commands)
         gating_results = list(command_results)
-        if not self.strict_specification:
-            verification_planner = VerificationPlanner(self.coordinator.workspace.root)
-            if self.verification_gate == "files":
-                core_commands = {verification_planner.file_check_command(plan.changes)}
-            else:
-                core_commands = set(verification_planner.build(plan.changes, ()))
+        if core_commands is not None:
             gating_commands = tuple(
                 command for command in plan.verification_commands if tuple(command) in core_commands
             )
@@ -1092,7 +1109,11 @@ class TaskOrchestrator:
                 notes.append(f"Advisory check failed (not gating): {label} ({status})")
 
         specification_report = None
-        if specification is not None:
+        if specification is not None and self.verification_gate == "files":
+            notes.append(
+                "Specification checks not run (gate: files); use --verify tests or --verify spec to run them."
+            )
+        elif specification is not None:
             try:
                 verification_engine = SpecificationVerificationEngine()
                 specification_report = verification_engine.evaluate(

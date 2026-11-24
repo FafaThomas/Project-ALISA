@@ -2896,3 +2896,42 @@ def test_unautomated_functional_requirement_still_blocks_acceptance():
     result, _ = EngineeringSpecificationGenerator._complete_verification_coverage([], units, requirements)
 
     assert result[0].required is True
+
+
+def test_architecture_files_without_units_get_units():
+    # Regression: the burger shop architecture listed frontend/index.html and
+    # frontend/src/main.jsx, but no unit wrote them, so the repo lacked both.
+    requirements = [
+        Requirement("REQ-004", "Create frontend/package.json, vite.config.js, and required React files for Vite project"),
+        Requirement("REQ-005", "Implement frontend React app to display menu, manage cart, and submit orders"),
+        Requirement("REQ-009", "Use only sqlite3", RequirementKind.CONSTRAINT),
+    ]
+    units = [
+        ImplementationUnit("UNIT-003", "Package", "frontend/package.json", kind=UnitKind.CONFIGURATION, satisfies=("REQ-004",)),
+        ImplementationUnit("UNIT-005", "App", "frontend/src/App.jsx", satisfies=("REQ-005",)),
+    ]
+    architecture_paths = [
+        "frontend/package.json", "frontend/index.html", "frontend/src/main.jsx",
+        "frontend/src/App.jsx", "frontend/", "frontend/src",
+    ]
+
+    result, repairs = EngineeringSpecificationGenerator._complete_architecture_file_units(
+        units, requirements, architecture_paths
+    )
+
+    added = {unit.target_path: unit for unit in result if unit.unit_id.startswith("UNIT-ARCH-")}
+    assert set(added) == {"frontend/index.html", "frontend/src/main.jsx"}
+    assert added["frontend/index.html"].satisfies == ("REQ-004",)
+    assert added["frontend/src/main.jsx"].satisfies == ("REQ-005",)
+    assert added["frontend/src/main.jsx"].kind == UnitKind.SOURCE
+    assert {item["target_path"] for item in repairs} == set(added)
+
+
+def test_constraint_only_spec_gets_no_architecture_units():
+    requirements = [Requirement("REQ-001", "Do not touch other files", RequirementKind.CONSTRAINT)]
+
+    result, repairs = EngineeringSpecificationGenerator._complete_architecture_file_units(
+        [], requirements, ["README.md"]
+    )
+
+    assert result == [] and repairs == []

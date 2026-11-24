@@ -63,6 +63,10 @@ def _normalize_model_file_content(path: str, content: str | None) -> str | None:
                 f"valid: {exc.msg} (line {exc.lineno}). The plan was rejected "
                 "before approval; no workspace files were changed."
             ) from exc
+        reordered = move_main_guard_to_end(content)
+        if reordered != content:
+            LOGGER.info("Moved the __main__ block of %s to the end of the file.", path)
+            content = reordered
         undefined = undefined_python_names(content)
         if undefined:
             listed = ", ".join(f"{name} (line {line})" for name, line in undefined)
@@ -83,6 +87,40 @@ def _is_main_guard(node: ast.AST) -> bool:
     has_name = any(isinstance(item, ast.Name) and item.id == "__name__" for item in operands)
     has_main = any(isinstance(item, ast.Constant) and item.value == "__main__" for item in operands)
     return has_name and has_main
+
+
+def move_main_guard_to_end(source: str) -> str:
+    """Move `if __name__ == "__main__":` blocks below every other top-level statement.
+
+    When a script runs, the guard's body (often a blocking `app.run()`) executes
+    before any definitions that follow it, so those names are missing at call
+    time. On import the guard never runs, so its position does not matter there.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    body = tree.body
+    guards = [index for index, node in enumerate(body) if _is_main_guard(node)]
+    if not guards or all(_is_main_guard(node) for node in body[guards[0]:]):
+        return source
+    lines = source.splitlines(keepends=True)
+    moved: list[str] = []
+    drop: set[int] = set()
+    for index in guards:
+        node = body[index]
+        start, end = node.lineno - 1, node.end_lineno
+        block = lines[start:end]
+        if block and not block[-1].endswith(("\n", "\r")):
+            block[-1] += "\n"
+        moved.extend(block)
+        drop.update(range(start, end))
+    kept = [line for number, line in enumerate(lines) if number not in drop]
+    while kept and not kept[-1].strip():
+        kept.pop()
+    if kept and not kept[-1].endswith(("\n", "\r")):
+        kept[-1] += "\n"
+    return "".join(kept) + "\n\n" + "".join(moved)
 
 
 def import_time_argument_read(source: str) -> int | None:

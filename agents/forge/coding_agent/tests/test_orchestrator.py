@@ -1710,13 +1710,19 @@ def test_advisory_mode_fails_on_core_checks_and_reports_only_core_results(tmp_pa
     assert not (tmp_path / "config.py").exists()
 
 
-def test_files_gate_completes_when_the_project_tests_fail(tmp_path):
-    # Default CLI gate: the agent delivers the repository; failing project tests are reported, not blocking.
-    result, _, _ = _advisory_run(tmp_path, gate="files", failing=_is_spec_pytest, with_test=True)
+def test_files_gate_runs_only_the_file_check(tmp_path):
+    # Default CLI gate: the agent delivers the repository. Tests, suggested and spec
+    # commands are not run, so they cannot block, leave stray files, or start servers.
+    result, runner, asked = _advisory_run(tmp_path, gate="files", failing=_is_spec_pytest, with_test=True)
 
     assert result.status == TaskStatus.COMPLETED, result.errors
-    assert any(note.startswith("Advisory check failed (not gating): python -m pytest") for note in result.notes)
+    ran = [command for command, _ in runner.calls]
+    assert ran and all(command[1] == "-c" for command in ran)
+    assert any(note.startswith("Skipped ") and "(gate: files)" in note for note in result.notes)
+    assert any(note.startswith("Specification checks not run (gate: files)") for note in result.notes)
+    assert asked == []
     assert (tmp_path / "config.py").is_file()
+    assert (tmp_path / "tests" / "test_config.py").is_file()
 
 
 def test_tests_gate_fails_when_the_project_tests_fail(tmp_path):

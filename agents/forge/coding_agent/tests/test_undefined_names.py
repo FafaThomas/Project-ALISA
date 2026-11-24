@@ -47,3 +47,47 @@ def test_generated_python_with_an_undefined_name_is_rejected():
 
 def test_non_python_files_are_not_checked():
     assert _normalize_model_file_content("README.md", "Run execute_operation()\n") == "Run execute_operation()\n"
+
+
+BURGER_APP = (
+    "from flask import Flask\n"
+    "app = Flask(__name__)\n"
+    "\n"
+    "@app.before_request\n"
+    "def handle_first_request():\n"
+    "    create_tables()\n"
+    "\n"
+    "if __name__ == '__main__':\n"
+    "    app.run(port=5000)\n"
+    "\n"
+    "\n"
+    "def create_tables():\n"
+    "    pass"
+)
+
+
+def test_main_guard_is_moved_below_later_definitions():
+    # Regression: the burger repair defined create_tables after a blocking app.run(),
+    # so running the script raised NameError on the first request.
+    from coding_agent.planner import move_main_guard_to_end
+
+    fixed = move_main_guard_to_end(BURGER_APP)
+
+    assert fixed.index("def create_tables") < fixed.index("if __name__")
+    assert fixed.rstrip().endswith("app.run(port=5000)")
+    compile(fixed, "app.py", "exec")
+
+
+def test_generated_content_gets_the_main_guard_repair():
+    fixed = _normalize_model_file_content("backend/app.py", BURGER_APP)
+
+    assert fixed.index("def create_tables") < fixed.index("if __name__")
+
+
+def test_main_guard_already_last_is_left_alone():
+    from coding_agent.planner import move_main_guard_to_end
+
+    source = "def main():\n    pass\n\nif __name__ == '__main__':\n    main()\n"
+
+    assert move_main_guard_to_end(source) == source
+    assert move_main_guard_to_end("x = 1\n") == "x = 1\n"

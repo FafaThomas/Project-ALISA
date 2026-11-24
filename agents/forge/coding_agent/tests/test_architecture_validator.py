@@ -1,3 +1,4 @@
+import json
 from coding_agent.architecture_validator import ArchitectureDesignValidator
 from coding_agent.engineering_spec import ArchitectureModule, Requirement
 from coding_agent.espec_generator import EngineeringSpecificationGenerator
@@ -101,12 +102,13 @@ def test_does_not_force_separation_when_task_does_not_request_it():
     assert report.valid
 
 
-def test_architecture_stage_retries_after_quality_validation_failure():
+def test_architecture_quality_findings_are_warnings_not_stage_failures(tmp_path):
+    # Design-quality findings no longer fail or retry the architecture stage.
     requirement = Requirement(
         "REQ-001",
         "Keep game logic independently testable without Pygame rendering.",
     )
-    bad = {
+    catch_all = {
         "architecture": [{
             "module_id": "MOD-001",
             "name": "Root Repository",
@@ -115,17 +117,8 @@ def test_architecture_stage_retries_after_quality_validation_failure():
             "file_paths": ["game.py", "renderer.py", "main.py", "requirements.txt", "README.md", "tests/test_game.py"],
         }]
     }
-    good = {
-        "architecture": [
-            {"module_id": "MOD-001", "name": "Game Logic", "responsibility": "Owns game state and rules", "depends_on": [], "file_paths": ["game.py"]},
-            {"module_id": "MOD-002", "name": "Renderer", "responsibility": "Owns Pygame presentation", "depends_on": ["MOD-001"], "file_paths": ["renderer.py"]},
-            {"module_id": "MOD-003", "name": "Application", "responsibility": "Coordinates startup and the game loop", "depends_on": ["MOD-001", "MOD-002"], "file_paths": ["main.py"]},
-            {"module_id": "MOD-004", "name": "Tests", "responsibility": "Verifies game mechanics", "depends_on": ["MOD-001"], "file_paths": ["tests/test_game.py"]},
-            {"module_id": "MOD-005", "name": "Project Support", "responsibility": "Maintains dependencies and documentation", "depends_on": [], "file_paths": ["requirements.txt", "README.md"]},
-        ]
-    }
-    client = FakeClient([bad, good])
-    generator = EngineeringSpecificationGenerator(client, max_stage_attempts=2)
+    client = FakeClient([catch_all])
+    generator = EngineeringSpecificationGenerator(client, max_stage_attempts=2, diagnostics_dir=tmp_path)
     trace = []
 
     modules = generator._stage(
@@ -137,10 +130,32 @@ def test_architecture_stage_retries_after_quality_validation_failure():
         ),
     )
 
-    assert len(modules) == 5
-    assert trace[0].attempts == 2
+    assert len(modules) == 1
+    assert trace[0].attempts == 1
     assert trace[0].success is True
-    assert "architecture design quality validation failed" in client.prompts[1]
+    warnings = json.loads((tmp_path / "architecture_design_warnings.json").read_text(encoding="utf-8"))
+    assert any("combines distinct responsibilities" in item or "omnibus" in item for item in warnings["warnings"])
+
+
+def test_duplicate_architecture_paths_are_kept_in_the_first_module(tmp_path):
+    # Regression: the burger shop spec failed because Menu.jsx and friends were listed under two modules.
+    data = {
+        "architecture": [
+            {"module_id": "MOD-003", "name": "Frontend App", "responsibility": "Starts the React app",
+             "depends_on": [], "file_paths": ["frontend/src/main.jsx", "frontend/src/Menu.jsx", "frontend/src/Cart.jsx"]},
+            {"module_id": "MOD-004", "name": "Frontend Components", "responsibility": "Menu and cart components",
+             "depends_on": ["MOD-003"], "file_paths": ["frontend/src/Menu.jsx", "frontend/src/Cart.jsx", "frontend/src/OrderForm.jsx"]},
+        ]
+    }
+    generator = EngineeringSpecificationGenerator(FakeClient([]), diagnostics_dir=tmp_path)
+
+    modules = generator._parse_and_validate_architecture(data, [Requirement("REQ-001", "Build the frontend.")])
+
+    paths = {module.module_id: module.file_paths for module in modules}
+    assert paths["MOD-003"] == ("frontend/src/main.jsx", "frontend/src/Menu.jsx", "frontend/src/Cart.jsx")
+    assert paths["MOD-004"] == ("frontend/src/OrderForm.jsx",)
+    repairs = json.loads((tmp_path / "architecture_path_dedupe.json").read_text(encoding="utf-8"))
+    assert {item["path"] for item in repairs} == {"frontend/src/Menu.jsx", "frontend/src/Cart.jsx"}
 
 
 def test_generation_persists_separate_architecture_and_implementation_plan_artifacts(tmp_path):
