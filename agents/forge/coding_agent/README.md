@@ -359,6 +359,10 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
   Divisions then run in order, phase by phase.
 - **Division leads** split build work into items, one owner per file, when the division has two or
   more builders. Development's Tech Lead does this whenever Development builds.
+- **One owner per file, enforced.** Each file a lead assigns belongs to that work item. A specialist
+  writing a file owned by another work item is rejected, and the rejection is listed in the run's
+  warnings. New files nobody was assigned are open, a team specialist's sub-specialists may write
+  their parent item's files, and the Debugging Specialist's repairs may change any file.
 - **Developers see each other's work.** Each developer gets the signatures of the Python files
   teammates already wrote this run. Leads must name, in each work item, the functions and classes a
   file has to provide.

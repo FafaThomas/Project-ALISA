@@ -130,15 +130,50 @@ class Workspace:
         return written
 
 
+# Work-item ids that may change any file: repair rounds fix whatever the files gate reports.
+UNOWNED_WRITERS = frozenset({"repair", ""})
+
+
 class ChangeSet:
-    """Proposed changes layered over the workspace, last writer wins per path."""
+    """Proposed changes layered over the workspace.
+
+    Files are owned by the work item a lead assigned them to. A change made for
+    a different work item is rejected, so one specialist cannot overwrite a
+    teammate's file. Files nobody claimed (e.g. a new helper module) are open
+    to whoever creates them, and repairs may change any file.
+    """
 
     def __init__(self, workspace: Workspace) -> None:
         self.workspace = workspace
         self._changes: dict[str, FileChange] = {}
+        self._owners: dict[str, tuple[str, str]] = {}   # path -> (work item id, owner role)
+
+    def claim(self, path: str, work_item_id: str, owner_role: str) -> None:
+        """Record that ``path`` belongs to a work item. The first claim wins."""
+        try:
+            rel = self.workspace.normalize(path)
+        except WorkspaceError:
+            return
+        self._owners.setdefault(rel, (work_item_id, owner_role))
+
+    def owner(self, path: str) -> tuple[str, str] | None:
+        try:
+            return self._owners.get(self.workspace.normalize(path))
+        except WorkspaceError:
+            return None
+
+    @staticmethod
+    def _same_item(owner_item: str, writer_item: str) -> bool:
+        # Sub-items of a team specialist are named "<item>.<sub>".
+        return writer_item == owner_item or writer_item.startswith(owner_item + ".")
 
     def add(self, change: FileChange) -> FileChange:
         change.path = self.workspace.normalize(change.path)
+        owner = self._owners.get(change.path)
+        if owner and change.work_item_id not in UNOWNED_WRITERS and not self._same_item(owner[0], change.work_item_id):
+            raise WorkspaceError(
+                f"{change.path} belongs to work item {owner[0]} ({owner[1]}); "
+                f"{change.author_role or 'this specialist'} on {change.work_item_id} may not change it")
         if change.action != "delete":
             # The label describes the effect on disk, however many times the file changed this run.
             on_disk = (self.workspace.root / change.path).is_file()

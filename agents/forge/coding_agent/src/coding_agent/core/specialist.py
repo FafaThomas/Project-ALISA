@@ -262,7 +262,8 @@ class Specialist:
         produced = produced_interfaces(changes, exclude=set(item.files))
         sections = [
             f"## Your work item {item.id}: {item.title}\n{item.description}\n\n"
-            f"Files you own: {', '.join(item.files) or 'choose sensible paths'}",
+            f"Files you own: {', '.join(item.files) or 'choose sensible paths'}. Write only these, or new files "
+            "no work item owns; changes to files owned by teammates' work items are rejected.",
             f"## Other work items (owned by teammates)\n{others}",
             f"## Files teammates already produced this run (use these exact names when you import them)\n"
             f"{produced}",

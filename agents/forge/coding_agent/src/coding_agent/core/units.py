@@ -416,6 +416,8 @@ class DivisionRunner:
             if item.id in taken:
                 item.id = f"{self.division.id}-{item.id}"
             taken.add(item.id)
+            for path in item.files:
+                session.changes.claim(path, item.id, item.owner_role)
         session.work_items.extend(items)
         for item in items:
             role = session.tree.by_id[item.owner_role]
@@ -518,6 +520,8 @@ def finish(session: Session, report: RunReport, *, remember: bool) -> RunReport:
 
     failed = [o for o in session.outputs if o.error]
     report.warnings = [f"{o.role} ({o.phase}) failed: {o.error[:200]}" for o in failed]
+    report.warnings += [f"{o.role} ({o.phase}): {c}" for o in session.outputs for c in o.concerns
+                        if c.startswith("rejected file")]
     # A specialist whose model failed may still deliver (e.g. a reviewer's deterministic tools).
     empty = [o for o in failed if not (o.changes or o.findings or o.work_items or o.decisions)]
     everyone_failed = bool(session.outputs) and len(empty) == len(session.outputs)
