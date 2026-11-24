@@ -62,14 +62,14 @@ def validate_approved_change(
     try:
         target = workspace.resolve_path(proposal.path)
     except WorkspaceError:
-        if proposal.change_type not in (ChangeType.CREATE, ChangeType.MKDIR):
+        if proposal.change_type != ChangeType.CREATE:
             raise StaleFileError(
                 "Expected existing file is missing or cannot be resolved"
             )
         target = workspace.root / proposal.path
 
     
-    if proposal.change_type in (ChangeType.CREATE, ChangeType.MKDIR):
+    if proposal.change_type == ChangeType.CREATE:
         try:
             target = workspace.resolve_create_path(proposal.path)
         except WorkspaceError as exc:
@@ -107,12 +107,7 @@ def validate_approved_change(
         else None
     )
 
-    if proposal.change_type == ChangeType.MKDIR:
-        from coding_agent.change_tracking import DIRECTORY_STATE_HASH
-        if change.resulting_hash != DIRECTORY_STATE_HASH:
-            raise WriteGuardError("Directory creation record has an invalid resulting hash")
-        intended_hash = DIRECTORY_STATE_HASH
-    elif proposal.change_type == ChangeType.DELETE:
+    if proposal.change_type == ChangeType.DELETE:
         if change.resulting_hash is not None:
             raise WriteGuardError("Delete record must have no resulting hash")
     elif change.resulting_hash != intended_hash:

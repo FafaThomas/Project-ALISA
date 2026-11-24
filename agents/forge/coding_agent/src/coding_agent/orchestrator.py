@@ -15,7 +15,6 @@ from coding_agent.change_tracking import (
     ChangeState,
     WorkspaceChange,
     content_hash,
-    DIRECTORY_STATE_HASH,
 )
 from coding_agent.coordinator import ChangeCoordinator, CoordinatedChange
 from coding_agent.models import (
@@ -70,8 +69,13 @@ class TaskOrchestrator:
         retry_policy: RetryPolicy | None = None,
         task_journal: TaskEventJournal | None = None,
         max_planning_corrections: int = 2,
+        specification_client=None,
     ) -> None:
         self.planner = planner
+        # The architect model creates the staged Engineering Specification.
+        # Keep the planner's own client as a backwards-compatible fallback for
+        # callers that have not configured separate model roles.
+        self.specification_client = specification_client
         self.coordinator = coordinator
         self.command_runner = command_runner
         self.verification_engine = verification_engine
@@ -124,15 +128,6 @@ class TaskOrchestrator:
         label. Delete operations are never rewritten.
         """
         workspace = self.coordinator.workspace
-
-        if proposal.change_type == ChangeType.MKDIR:
-            try:
-                target = workspace.resolve_create_path(proposal.path)
-            except WorkspacePathError as exc:
-                raise OrchestrationError(
-                    f"Cannot safely create directory {proposal.path!r}: {exc}"
-                ) from exc
-            return proposal, None
 
         if proposal.change_type == ChangeType.DELETE:
             try:
@@ -188,16 +183,7 @@ class TaskOrchestrator:
 
         workspace = self.coordinator.workspace
 
-        if proposal.change_type == ChangeType.MKDIR:
-            try:
-                target = workspace.resolve_create_path(proposal.path)
-            except Exception as exc:
-                raise OrchestrationError(
-                    f"Cannot create directory {proposal.path!r}: target must not already exist."
-                ) from exc
-            original_bytes = None
-            resulting_hash = DIRECTORY_STATE_HASH
-        elif proposal.change_type.value == "create":
+        if proposal.change_type.value == "create":
             try:
                 workspace.resolve_create_path(proposal.path)
             except Exception as exc:
@@ -232,7 +218,7 @@ class TaskOrchestrator:
             operation=proposal.change_type.value,
             state=ChangeState.PROPOSED,
             original_hash=content_hash(original_bytes),
-            resulting_hash=(resulting_hash if proposal.change_type == ChangeType.MKDIR else content_hash(intended_bytes)),
+            resulting_hash=content_hash(intended_bytes),
             reason=proposal.reason,
         )
 
@@ -300,6 +286,26 @@ class TaskOrchestrator:
 
         return tuple(dict.fromkeys(paths))
 
+    def _record_recovery_context(self, task_id: str, attempt: int, context: str) -> str | None:
+        """Save the exact feedback given to the next attempt, for later inspection.
+
+        Best effort: a failure to write diagnostics must not stop the retry.
+        """
+        diagnostics_dir = (
+            self.coordinator.workspace.root / ".coding-agent" / "diagnostics"
+            / EngineeringSpecificationGenerator._slug(task_id)
+        )
+        path = diagnostics_dir / f"recovery_attempt_{attempt}.txt"
+        try:
+            diagnostics_dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(context, encoding="utf-8")
+        except OSError as exc:
+            return f"Could not save recovery context for attempt {attempt}: {exc}"
+        return self._record_task_event(
+            task_id, "recovery_context_built", attempt,
+            {"path": str(path), "chars": len(context)},
+        )
+
     def _historical_context(
         self, task_id: str | None = None, *, limit: int = 30
     ) -> str:
@@ -316,7 +322,9 @@ class TaskOrchestrator:
         change_path = root / ".coding-agent" / "changes.jsonl"
         lines: list[str] = []
 
-        def read_jsonl(path: Path) -> list[dict]:
+        def read_jsonl(path: Path, keep=None) -> list[dict]:
+            # Filter before applying the limit. Otherwise, a busy shared journal
+            # can push this task's own records out of the tail window.
             if not path.is_file():
                 return []
             records = []
@@ -324,28 +332,29 @@ class TaskOrchestrator:
                 raw_lines = path.read_text(encoding="utf-8").splitlines()
             except (OSError, UnicodeError):
                 return []
-            for raw in raw_lines[-limit:]:
+            for raw in raw_lines:
                 try:
                     value = json.loads(raw)
                 except (ValueError, TypeError):
                     continue
-                if isinstance(value, dict):
+                if isinstance(value, dict) and (keep is None or keep(value)):
                     records.append(value)
-            return records
+            return records[-limit:]
 
-        task_events = read_jsonl(task_path)
-        change_events = read_jsonl(change_path)
-
+        task_keep = None
+        change_keep = None
         if task_id is not None:
-            task_events = [
-                item for item in task_events
-                if item.get("task_id") == task_id
-            ]
-            change_events = [
-                item for item in change_events
-                if item.get("task_id") == task_id
-                or str(item.get("change_id") or "").startswith(f"{task_id}-")
-            ]
+            def task_keep(item: dict) -> bool:
+                return item.get("task_id") == task_id
+
+            def change_keep(item: dict) -> bool:
+                return (
+                    item.get("task_id") == task_id
+                    or str(item.get("change_id") or "").startswith(f"{task_id}-")
+                )
+
+        task_events = read_jsonl(task_path, task_keep)
+        change_events = read_jsonl(change_path, change_keep)
 
         if task_events:
             lines.append("RECENT TASK HISTORY (summaries only):")
@@ -375,6 +384,83 @@ class TaskOrchestrator:
         if specification is not None and "specification" in parameters:
             return self.planner.plan(task, context=context, specification=specification)
         return self.planner.plan(task, context=context)
+
+
+    @staticmethod
+    def _espec_repair_paths(
+        specification: EngineeringSpecification,
+        report,
+    ) -> tuple[str, ...]:
+        """Select only artifact paths implicated by ESpec plan validation."""
+        units_by_id = {unit.unit_id: unit for unit in specification.implementation_units}
+        covered_unit_ids = set(report.covered_units)
+        selected: dict[str, str] = {}
+
+        def add_unit(unit) -> None:
+            key = unit.target_path.replace("\\", "/").casefold()
+            selected.setdefault(key, unit.target_path.replace("\\", "/"))
+
+        for missing in report.missing_units:
+            unit_id = missing.split(" -> ", 1)[0].strip()
+            unit = units_by_id.get(unit_id)
+            if unit is not None:
+                add_unit(unit)
+
+        missing_requirement_ids = set(report.missing_requirements)
+        known_requirement_ids = {
+            requirement.requirement_id for requirement in specification.requirements
+        }
+        semantic_requirement_ids: set[str] = set()
+        for issue in report.semantic_issues:
+            prefix = issue.split(":", 1)[0].strip()
+            if prefix in known_requirement_ids:
+                semantic_requirement_ids.add(prefix)
+
+        for requirement_id in missing_requirement_ids:
+            for unit in specification.implementation_units:
+                if requirement_id in unit.satisfies and unit.unit_id not in covered_unit_ids:
+                    add_unit(unit)
+        for requirement_id in semantic_requirement_ids:
+            for unit in specification.implementation_units:
+                if requirement_id in unit.satisfies:
+                    add_unit(unit)
+
+        return tuple(selected[key] for key in sorted(selected))
+
+    @staticmethod
+    def _merge_focused_espec_repair(
+        plan: ImplementationPlan,
+        repaired_changes: tuple,
+        required_paths: tuple[str, ...],
+        undeclared_paths: tuple[str, ...],
+    ) -> ImplementationPlan:
+        normalize = lambda value: value.replace("\\", "/").strip("/").casefold()
+        repair_keys = {normalize(path) for path in required_paths}
+        undeclared_keys = {normalize(path) for path in undeclared_paths}
+        repaired_by_path = {normalize(change.path): change for change in repaired_changes}
+
+        if set(repaired_by_path) != repair_keys:
+            missing = sorted(repair_keys - set(repaired_by_path))
+            extra = sorted(set(repaired_by_path) - repair_keys)
+            details = []
+            if missing:
+                details.append("missing " + ", ".join(missing))
+            if extra:
+                details.append("unexpected " + ", ".join(extra))
+            raise OrchestrationError(
+                "Focused ESpec repair did not return the exact required path set: "
+                + "; ".join(details)
+            )
+
+        preserved = [
+            change for change in plan.changes
+            if normalize(change.path) not in repair_keys
+            and normalize(change.path) not in undeclared_keys
+        ]
+        merged = tuple(preserved) + tuple(
+            repaired_by_path[normalize(path)] for path in required_paths
+        )
+        return replace(plan, changes=merged)
 
     def _run_once(
         self,
@@ -422,11 +508,45 @@ class TaskOrchestrator:
                 planner_context += "\n\n" + historical_context
             if additional_context:
                 planner_context += "\n\n" + additional_context
-            plan = self._planner_plan(task, planner_context, specification)
+            planning_corrections_used = 0
+            try:
+                plan = self._planner_plan(task, planner_context, specification)
+            except ValueError as exc:
+                # A syntactically invalid generated Python file is a repairable
+                # model-output defect, not a reason to consume an entire user-
+                # approved task retry. Ask the planner to regenerate with the
+                # exact parser diagnostic before entering ESpec coverage checks.
+                message = str(exc)
+                if (
+                    specification is None
+                    or "Generated Python content for" not in message
+                    or "not syntactically valid" not in message
+                    or self.max_planning_corrections < 1
+                ):
+                    raise
+                syntax_feedback = (
+                    "PLAN CONTENT SYNTAX FAILURE\n"
+                    f"{message}\n"
+                    "Regenerate the complete implementation plan. The Python file "
+                    "named in the diagnostic must contain valid Python source from "
+                    "its first character. Do not include Markdown fences, prose, "
+                    "YAML, JSON, or shell commands in a .py file. Preserve the "
+                    "required ESpec paths and all valid implementation obligations."
+                )
+                planning_corrections_used = 1
+                notes.append(
+                    "Requested one bounded corrective plan after generated Python "
+                    "content failed syntax validation."
+                )
+                plan = self._planner_plan(
+                    task, planner_context + "\n\n" + syntax_feedback, specification
+                )
 
             if specification is not None:
                 validator = PlanSpecificationValidator()
-                for correction in range(self.max_planning_corrections + 1):
+                for correction in range(
+                    planning_corrections_used, self.max_planning_corrections + 1
+                ):
                     report = validator.validate(plan, specification)
                     if report.valid:
                         notes.append(
@@ -537,9 +657,33 @@ class TaskOrchestrator:
                         ], ensure_ascii=False, indent=2)
                         + ("\n\nVALIDATION-SPECIFIC REPAIR GUIDANCE:\n" + "\n\n".join(repair_guidance) if repair_guidance else "")
                     )
-                    plan = self._planner_plan(
-                        task, planner_context + "\n\n" + diagnostic, specification
+                    focused_repair = getattr(
+                        self.planner, "repair_missing_changes", None
                     )
+                    repair_paths = self._espec_repair_paths(specification, report)
+                    if callable(focused_repair) and repair_paths:
+                        repaired_changes = focused_repair(
+                            task,
+                            context=planner_context,
+                            specification=specification,
+                            existing_plan=plan,
+                            required_paths=repair_paths,
+                            issues=report.issues,
+                        )
+                        plan = self._merge_focused_espec_repair(
+                            plan,
+                            tuple(repaired_changes),
+                            repair_paths,
+                            report.undeclared_paths,
+                        )
+                        notes.append(
+                            "Requested focused ESpec file repair for: "
+                            + ", ".join(repair_paths)
+                        )
+                    else:
+                        plan = self._planner_plan(
+                            task, planner_context + "\n\n" + diagnostic, specification
+                        )
 
         except Exception as exc:
             return ExecutionResult(
@@ -597,21 +741,10 @@ class TaskOrchestrator:
             try:
                 approved_changes = []
                 normalized_proposals = []
-                planned_directories: set[str] = set()
                 for index, proposal in enumerate(plan.changes):
                     proposal, normalization_note = self._normalize_proposal_operation(
                         proposal
                     )
-                    if proposal.change_type == ChangeType.MKDIR:
-                        parent = Path(proposal.path.replace("\\", "/")).parent.as_posix()
-                        if parent not in {"", "."}:
-                            parent_path = self.coordinator.workspace.root / parent
-                            if not parent_path.is_dir() and parent.casefold() not in planned_directories:
-                                raise OrchestrationError(
-                                    f"Directory {proposal.path!r} has a missing parent {parent!r}; "
-                                    "add a parent mkdir operation before this operation."
-                                )
-                        planned_directories.add(Path(proposal.path.replace("\\", "/")).as_posix().rstrip("/").casefold())
                     if normalization_note:
                         notes.append(normalization_note)
                         warning = self._record_task_event(
@@ -675,11 +808,10 @@ class TaskOrchestrator:
                 diagnostic = (
                     "PLAN VALIDATION FAILURE\n"
                     f"{message}\n"
-                    "Correct the implementation plan. Re-check the workspace inventory, including directories. "
-                    "Use mkdir only for a missing, explicitly required directory; create only for a "
-                    "genuinely missing file; modify existing files; and delete only an existing file "
-                    "explicitly intended for removal. Put parent mkdir operations before child directories. "
-                    "Do not weaken path safety, do not alter unrelated "
+                    "Correct the implementation plan. Re-check the workspace file inventory. "
+                    "Use modify for an existing file that needs changes, create only for a "
+                    "genuinely missing file, and delete only for an existing file explicitly "
+                    "intended for removal. Do not weaken path safety, do not alter unrelated "
                     "files, and return a complete corrected plan for the entire task."
                 )
                 warning = self._record_task_event(
@@ -1034,7 +1166,7 @@ class TaskOrchestrator:
         history: list[AttemptRecord] = []
         recovery_context = ""
         if specification is None:
-            client = getattr(self.planner, "client", None)
+            client = self.specification_client or getattr(self.planner, "client", None)
             if callable(getattr(client, "generate_json", None)):
                 diagnostics_dir = (
                     self.coordinator.workspace.root / ".coding-agent" / "diagnostics"
@@ -1043,21 +1175,46 @@ class TaskOrchestrator:
                 generator = None
                 try:
                     project_context = self.context_engine.build(task).render()
-                    generator = EngineeringSpecificationGenerator(client, diagnostics_dir=diagnostics_dir)
-                    specification = generator.generate(
-                        task_id=task.task_id,
-                        objective=task.description,
-                        workspace=task.workspace,
-                        constraints=task.constraints,
-                        acceptance_criteria=task.acceptance_criteria,
-                        project_context=project_context,
-                    )
-                    warning = self._record_task_event(
-                        task.task_id, "engineering_specification_created", 0,
-                        {"specification": specification.to_dict()},
-                    )
-                    if warning:
-                        recovery_context += warning
+                    max_spec_attempts = max(1, self.retry_policy.max_attempts)
+                    spec_feedback = ""
+                    for spec_attempt in range(1, max_spec_attempts + 1):
+                        try:
+                            generator = EngineeringSpecificationGenerator(client, diagnostics_dir=diagnostics_dir)
+                            specification = generator.generate(
+                                task_id=task.task_id,
+                                objective=task.description,
+                                workspace=task.workspace,
+                                constraints=task.constraints,
+                                acceptance_criteria=task.acceptance_criteria,
+                                project_context=project_context + spec_feedback,
+                            )
+                            warning = self._record_task_event(
+                                task.task_id, "engineering_specification_created", spec_attempt,
+                                {"specification": specification.to_dict()},
+                            )
+                            if warning:
+                                recovery_context += warning
+                            break
+                        except Exception as spec_exc:
+                            if spec_attempt >= max_spec_attempts:
+                                # The outer handler records the final failure.
+                                raise
+                            # Retry the specification under the same attempt budget,
+                            # telling the model exactly what the validator rejected.
+                            trace = generator._trace_payload(generator.last_trace) if generator is not None else []
+                            self._record_task_event(
+                                task.task_id, "engineering_specification_retry", spec_attempt,
+                                {
+                                    "exception_type": type(spec_exc).__name__,
+                                    "error": str(spec_exc),
+                                    "generation_trace": trace,
+                                },
+                            )
+                            spec_feedback = (
+                                "\n\nPREVIOUS ENGINEERING SPECIFICATION ATTEMPT FAILED "
+                                f"(attempt {spec_attempt} of {max_spec_attempts}): {spec_exc}\n"
+                                "Produce a corrected complete specification that resolves this failure."
+                            )
                 except Exception as exc:
                     trace = generator._trace_payload(generator.last_trace) if generator is not None else []
                     warning = self._record_task_event(
@@ -1075,6 +1232,13 @@ class TaskOrchestrator:
                     return ExecutionResult(
                         task_id=task.task_id, status=TaskStatus.FAILED, errors=errors,
                     )
+                finally:
+                    # Free the architect model before the coding model is asked
+                    # to generate implementation files. This is important on
+                    # GPUs where both quantized models cannot remain resident.
+                    unload = getattr(client, "unload", None)
+                    if callable(unload):
+                        unload()
         if specification is not None:
             try:
                 specification, check_notes = SpecificationCheckPlanner(
@@ -1305,6 +1469,9 @@ class TaskOrchestrator:
                 )
 
             recovery_context = build_recovery_context(request)
+            warning = self._record_recovery_context(task.task_id, attempt, recovery_context)
+            if warning:
+                journal_warnings.append(warning)
 
         # The loop always returns from one of the branches above.
         assert final_result is not None

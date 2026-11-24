@@ -155,10 +155,16 @@ class FailureDiagnoser:
         evidence = self._bounded_evidence(result)
         combined = "\n".join(evidence).casefold()
 
-        if any(item.timed_out or item.exit_code is None for item in result.command_results):
+        if any(item.timed_out for item in result.command_results):
             category = FailureCategory.ENVIRONMENT_FAILURE
-            causes = ("A verification command timed out or could not be launched.",)
+            causes = ("A verification command timed out.",)
             confidence, actionable = "high", False
+        elif any(item.exit_code is None for item in result.command_results):
+            # The program is not available here. The plan can switch to a
+            # command that is, so this is actionable rather than terminal.
+            category = FailureCategory.ENVIRONMENT_FAILURE
+            causes = ("A verification command could not be launched; its program is probably not installed or not on PATH.",)
+            confidence, actionable = "high", True
         elif self._contains(combined, self._ENVIRONMENT_PATTERNS):
             category = FailureCategory.ENVIRONMENT_FAILURE
             causes = ("A required tool, service, permission, or execution environment may be unavailable.",)
@@ -215,16 +221,47 @@ class RepairStrategyGenerator:
         diagnosis: FailureDiagnosis,
         result: ExecutionResult,
     ) -> RepairStrategy:
-        paths = tuple(dict.fromkeys(
+        observed_paths = [
             change.path.replace("\\", "/")
             for change in result.proposed_changes
-        ))
+        ]
+        error_text = "\n".join(result.errors)
+        if diagnosis.category == FailureCategory.PLANNING_FAILURE and (
+            "espec plan validation" in error_text.casefold()
+            or "plan does not implement required espec implementation units" in error_text.casefold()
+        ):
+            observed_paths.extend(
+                match.group(1).replace("\\", "/")
+                for match in re.finditer(
+                    r"->\s*([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)",
+                    error_text,
+                )
+            )
+            lowered = error_text.casefold()
+            if any(token in lowered for token in ("pg_isready", "healthcheck", "service_healthy")):
+                observed_paths.append("docker-compose.yml")
+            if "project.yaml" in lowered or "parent phase" in lowered:
+                observed_paths.append("project.yaml")
+            if "readme.md" in lowered or "readme" in lowered:
+                observed_paths.append("README.md")
+        paths = tuple(dict.fromkeys(observed_paths))
 
+        espec_plan_failure = (
+            diagnosis.category == FailureCategory.PLANNING_FAILURE
+            and (
+                "espec plan validation" in error_text.casefold()
+                or "plan does not implement required espec implementation units" in error_text.casefold()
+            )
+        )
         common_constraints = (
             "Preserve the original task requirements and acceptance criteria.",
             "Do not modify unrelated files or weaken existing safety checks.",
             "Do not claim verification passed; propose a correction for the next attempt.",
-            "Return a complete fresh implementation plan and keep human approval required.",
+            (
+                "Preserve unaffected plan files and repair only the exact affected ESpec paths."
+                if espec_plan_failure
+                else "Return a complete fresh implementation plan and keep human approval required."
+            ),
         )
 
         instructions_by_category = {
@@ -258,12 +295,31 @@ class RepairStrategyGenerator:
                 "Correct the implementation or configuration with the smallest necessary change.",
                 "Do not replace or bypass the project's declared build tooling.",
             ),
+            FailureCategory.ENVIRONMENT_FAILURE: (
+                "Identify the program named by the command that could not be launched.",
+                "Replace that command with one that is available here: standard tooling for the project's language, or a tool the task explicitly names.",
+                "Do not add dependencies or verification tools that the environment does not provide.",
+            ),
         }
 
-        instructions = instructions_by_category.get(
-            diagnosis.category,
-            ("Inspect the supplied evidence and relevant source context before proposing any correction.",),
-        )
+        if diagnosis.category == FailureCategory.PLANNING_FAILURE and (
+            "espec plan validation" in error_text.casefold()
+            or "plan does not implement required espec implementation units" in error_text.casefold()
+        ):
+            instructions = (
+                "Do not regenerate the entire project plan unchanged. Repair only the exact missing or semantically invalid ESpec artifacts identified in the diagnostics.",
+                "Preserve valid files and their content from the previous attempt; add or correct every missing target path listed in the diagnostics.",
+                "For each missing UNIT-ID -> path entry, produce the complete artifact at that exact path and satisfy every acceptance criterion mapped to it.",
+                "If the diagnostics identify pg_isready or a PostgreSQL healthcheck, correct docker-compose.yml with a valid PostgreSQL healthcheck and matching service_healthy dependency.",
+                "If the diagnostics identify project.yaml metadata, update the existing project.yaml with goal, approved stack, repository architecture, all six parent phase IDs, and truthful in-progress acceptance status.",
+                "If the diagnostics identify README requirements, complete the existing README with accurate setup, startup, shutdown, migrations, testing, and troubleshooting instructions.",
+                "Re-check the final plan against every ESpec unit and requirement before returning it. Do not weaken validators or claim verification passed.",
+            )
+        else:
+            instructions = instructions_by_category.get(
+                diagnosis.category,
+                ("Inspect the supplied evidence and relevant source context before proposing any correction.",),
+            )
         return RepairStrategy(
             objective=f"Address the diagnosed {diagnosis.category.value.replace('_', ' ')}.",
             instructions=instructions,

@@ -175,6 +175,7 @@ class SpecificationVerificationEngine:
                     status = VerificationStatus.PASS if evidence.succeeded else VerificationStatus.FAIL
                     reason = "Exact command completed successfully." if evidence.succeeded else (
                         "Command timed out." if evidence.timed_out else
+                        "Command could not be started; see its stderr." if evidence.exit_code is None else
                         f"Command exited with code {evidence.exit_code}.")
             item = CriterionResult(criterion.criterion_id, criterion.description,
                                    criterion.kind, criterion.required, status,

@@ -219,11 +219,15 @@ class CommandRunner:
                 text=False,
             )
         except OSError as exc:
+            program = normalized[0]
             return CommandResult(
                 command=normalized,
                 exit_code=None,
                 stdout="",
-                stderr=f"Could not start command: {exc}",
+                stderr=(
+                    f"Command could not be started: '{program}' is not installed "
+                    f"or is not on PATH ({exc})."
+                ),
                 timed_out=False,
             )
 

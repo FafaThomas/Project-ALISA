@@ -3,18 +3,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 from coding_agent.engineering_spec import (
     EngineeringSpecification,
     RequirementKind,
-    SpecificationStatus,
 )
 from coding_agent.models import ImplementationPlan
 from coding_agent.specification_checks import (
     compose_content_issues,
     env_example_content_issues,
     project_yaml_content_issues,
+    readme_missing_topics,
 )
 
 
@@ -22,50 +22,24 @@ def _path(value: str) -> str:
     return value.replace("\\\\", "/").replace("\\", "/").strip("/").casefold()
 
 
-def _is_directory_only_requirement(requirement) -> bool:
-    """Identify directory-layout obligations that are verified structurally."""
-    if requirement.kind == RequirementKind.CONSTRAINT:
-        return False
-    text = " ".join((requirement.description, *requirement.acceptance_criteria))
-    if not re.search(
-        r"\b(?:directory|directories|folder|folders|area|areas|layout|structure)\b",
-        text,
-        re.IGNORECASE,
-    ):
-        return False
-    if not re.search(r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)/", text):
-        return False
-    file_pattern = re.compile(
-        r"(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+"
-        r"\.(?:yml|yaml|json|md|txt|toml|py|tsx?|jsx?|html|css|sql)"
-        r"|(?<![A-Za-z0-9_.-])\.(?:dockerignore|gitignore|env(?:\.[A-Za-z0-9_-]+)?)",
-        re.IGNORECASE,
-    )
-    if file_pattern.search(text):
-        return False
-    return True
+_FORBIDDEN_IMPORT_PHRASE = re.compile(r"\bnot\s+import\s+(?:the\s+)?([A-Za-z_][\w.]*)", re.IGNORECASE)
+_IMPORT_STATEMENT = re.compile(r"(?m)^\s*import\s+([\w.,\s]+?)\s*$|^\s*from\s+([\w.]+)\s+import\b")
 
 
+def _forbidden_import_roots(text: str) -> set[str]:
+    """Top-level modules a requirement forbids, e.g. 'must not import Pygame' -> {'pygame'}."""
+    return {match.group(1).split(".")[0].casefold() for match in _FORBIDDEN_IMPORT_PHRASE.finditer(text)}
 
-def _explicit_directory_paths(text: str) -> tuple[str, ...]:
-    """Extract explicit relative directory paths from a directory-layout obligation."""
-    values = re.findall(
-        r"(?<![A-Za-z0-9_.-])((?:[A-Za-z0-9_.-]+/)+)(?![A-Za-z0-9_.-])",
-        text,
-    )
-    safe_values = []
-    for value in values:
-        candidate = value.rstrip("/")
-        parts = candidate.split("/")
-        if (
-            not candidate
-            or candidate.casefold() in {"root", "."}
-            or any(part in {"", ".", ".."} for part in parts)
-            or ":" in parts[0]
-        ):
-            continue
-        safe_values.append(_path(candidate))
-    return tuple(dict.fromkeys(safe_values))
+
+def _imported_roots(source: str) -> set[str]:
+    roots: set[str] = set()
+    for match in _IMPORT_STATEMENT.finditer(source):
+        if match.group(1):
+            roots.update(part.strip().split(".")[0].casefold() for part in match.group(1).split(","))
+        elif match.group(2):
+            roots.add(match.group(2).split(".")[0].casefold())
+    roots.discard("")
+    return roots
 
 
 def _matches_scope(candidate: str, declared_path: str) -> bool:
@@ -90,9 +64,6 @@ class PlanSpecificationReport:
     missing_units: tuple[str, ...] = ()
     required_requirements: tuple[str, ...] = ()
     semantic_issues: tuple[str, ...] = ()
-    covered_acceptance_criteria: tuple[str, ...] = ()
-    missing_acceptance_criteria: tuple[str, ...] = ()
-    missing_acceptance_verification: tuple[str, ...] = ()
 
     @property
     def issues(self) -> tuple[str, ...]:
@@ -111,16 +82,6 @@ class PlanSpecificationReport:
             values.append(
                 "Plan changes paths not declared by the ESpec: "
                 + ", ".join(self.undeclared_paths)
-            )
-        if self.missing_acceptance_criteria:
-            values.append(
-                "Plan does not implement required acceptance criteria: "
-                + ", ".join(self.missing_acceptance_criteria)
-            )
-        if self.missing_acceptance_verification:
-            values.append(
-                "Engineering specification does not verify acceptance criteria: "
-                + ", ".join(self.missing_acceptance_verification)
             )
         values.extend(self.semantic_issues)
         return tuple(values)
@@ -141,7 +102,7 @@ class PlanSpecificationValidator:
         content_by_path = {
             _path(change.path): (change.content or "")
             for change in plan.changes
-            if change.change_type.value not in {"delete", "mkdir"}
+            if change.change_type.value != "delete"
         }
         units_by_requirement: dict[str, list] = {}
         for unit in specification.implementation_units:
@@ -149,10 +110,29 @@ class PlanSpecificationValidator:
                 units_by_requirement.setdefault(requirement_id, []).append(unit)
         issues: list[str] = []
         for requirement in specification.requirements:
-            text = " ".join((requirement.description, *requirement.acceptance_criteria))
             units = units_by_requirement.get(requirement.requirement_id, [])
+            # An unmapped constraint is a compliance boundary, not a planned
+            # artifact obligation. Do not validate an absent planned file as
+            # though the plan were required to create or modify it. If a
+            # constraint is explicitly mapped to implementation units, its
+            # content remains subject to the same semantic checks as any other
+            # implementation requirement.
+            if requirement.kind == RequirementKind.CONSTRAINT and not units:
+                continue
+            text = " ".join((requirement.description, *requirement.acceptance_criteria))
             paths = [unit.target_path for unit in units]
             lowered = text.casefold()
+            forbidden_roots = _forbidden_import_roots(text)
+            if forbidden_roots:
+                for unit in units:
+                    if PurePosixPath(unit.target_path).suffix.lower() != ".py":
+                        continue
+                    source = content_by_path.get(_path(unit.target_path), "")
+                    for root in sorted(forbidden_roots & _imported_roots(source)):
+                        issues.append(
+                            f"{requirement.requirement_id}: {unit.target_path} imports "
+                            f"'{root}', which this requirement forbids"
+                        )
             compose_paths = [path for path in paths if PurePosixPath(path).name in {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}]
             if requirement.acceptance_criteria and compose_paths and re.search(r"docker|compose|postgres|postgresql|health|volume|credential", lowered, re.I):
                 compose = next((content_by_path.get(_path(path), "") for path in compose_paths), "")
@@ -166,15 +146,11 @@ class PlanSpecificationValidator:
                 env = content_by_path.get(_path(target), "")
                 for issue in env_example_content_issues(env):
                     issues.append(f"{requirement.requirement_id}: {issue}")
-            if "readme" in lowered and any(token in lowered for token in ("prerequisite", "environment setup", "compose workflow")):
+            if "readme" in lowered:
                 target = next((path for path in paths if PurePosixPath(path).name.lower() == "readme.md"), "README.md")
-                readme = content_by_path.get(_path(target), "").casefold()
-                groups = (("prerequisites", ("prerequisite", "requirements", "docker")),
-                          ("environment setup", ("environment", ".env", "env.example")),
-                          ("compose workflow", ("docker compose", "docker-compose", "compose up")))
-                for label, tokens in groups:
-                    if not any(token in readme for token in tokens):
-                        issues.append(f"{requirement.requirement_id}: README does not document {label}")
+                readme = content_by_path.get(_path(target), "")
+                for label in readme_missing_topics(readme, text):
+                    issues.append(f"{requirement.requirement_id}: README does not document {label}")
             if "project.yaml" in lowered:
                 target = next((path for path in paths if PurePosixPath(path).name == "project.yaml"), "project.yaml")
                 project = content_by_path.get(_path(target), "")
@@ -228,34 +204,10 @@ class PlanSpecificationValidator:
 
         # Older callers may supply a verification-only ESpec. Strict plan
         # coverage is enforceable only when implementation units are present.
-        if not specification.implementation_units and not any(
-            _is_directory_only_requirement(requirement)
-            or (
-                requirement.kind != RequirementKind.CONSTRAINT
-                and bool(_explicit_directory_paths(
-                    " ".join((requirement.description, *requirement.acceptance_criteria))
-                ))
-            )
-            for requirement in specification.requirements
-        ):
+        if not specification.implementation_units:
             return PlanSpecificationReport(True, (), (), (), ())
 
         changed_paths = [_path(change.path) for change in plan.changes]
-        mkdir_paths = {
-            _path(change.path)
-            for change in plan.changes
-            if change.change_type.value == "mkdir"
-        }
-        directory_requirement_paths = {
-            path
-            for requirement in specification.requirements
-            if requirement.kind != RequirementKind.CONSTRAINT and re.search(
-                r"\b(?:directory|directories|folder|folders|area|areas|layout|structure)\b",
-                " ".join((requirement.description, *requirement.acceptance_criteria)),
-                re.IGNORECASE,
-            )
-            for path in _explicit_directory_paths(" ".join((requirement.description, *requirement.acceptance_criteria)))
-        }
         architecture_paths = {
             _path(path)
             for module in specification.architecture
@@ -282,16 +234,6 @@ class PlanSpecificationValidator:
                     f"{unit.unit_id} -> {unit.target_path} "
                     "(workspace-root targets cannot be represented as file changes)"
                 )
-            elif scope in directory_requirement_paths:
-                existing_directory = (
-                    Path(specification.workspace) / scope
-                )
-                if scope in mkdir_paths or (
-                    existing_directory.is_dir() and not existing_directory.is_symlink()
-                ):
-                    covered_unit_ids.append(unit.unit_id)
-                else:
-                    missing_units.append(f"{unit.unit_id} -> {unit.target_path} (requires an explicit mkdir operation)")
             elif any(_matches_scope(changed, scope) for changed in changed_paths):
                 covered_unit_ids.append(unit.unit_id)
             else:
@@ -306,39 +248,12 @@ class PlanSpecificationValidator:
             mapped_units = units_by_requirement.get(requirement.requirement_id, [])
             is_constraint = requirement.kind == RequirementKind.CONSTRAINT
 
-            # Unmapped constraints and directory-only requirements do not
-            # require file edits. Directory existence must have a structural
-            # verification criterion instead of incidental child-file coverage.
+            # An unmapped constraint is a compliance boundary. It must be
+            # respected and verified, but must not force an artificial file edit.
             if is_constraint and not mapped_units:
                 continue
 
             required_requirements.append(requirement.requirement_id)
-            text = " ".join((requirement.description, *requirement.acceptance_criteria))
-            required_directories = set(_explicit_directory_paths(text))
-            workspace_root = Path(specification.workspace)
-            has_all_directories = bool(required_directories) and all(
-                path in mkdir_paths
-                or (
-                    (workspace_root / path).is_dir()
-                    and not (workspace_root / path).is_symlink()
-                )
-                for path in required_directories
-            )
-            if required_directories and not has_all_directories:
-                missing_requirements.append(requirement.requirement_id)
-                continue
-            if _is_directory_only_requirement(requirement):
-                has_structural_check = any(
-                    criterion.required
-                    and criterion.kind.value == "structural"
-                    and requirement.requirement_id in criterion.covers
-                    for criterion in specification.verification
-                )
-                if has_all_directories and has_structural_check:
-                    covered_requirements.append(requirement.requirement_id)
-                else:
-                    missing_requirements.append(requirement.requirement_id)
-                continue
             if not mapped_units:
                 missing_requirements.append(requirement.requirement_id)
                 continue
@@ -350,91 +265,14 @@ class PlanSpecificationValidator:
             else:
                 missing_requirements.append(requirement.requirement_id)
 
-        acceptance_criterion_units: dict[str, set[str]] = {}
-        for unit in specification.implementation_units:
-            for criterion_id in unit.implements_acceptance_criteria:
-                acceptance_criterion_units.setdefault(criterion_id, set()).add(unit.unit_id)
-        covered_acceptance_criteria = []
-        missing_acceptance_criteria = []
-        all_acceptance_ids = {
-            criterion_id for requirement in specification.requirements
-            for criterion_id in requirement.acceptance_criterion_ids
-        }
-        verified_acceptance_ids = {
-            criterion_id for criterion in specification.verification
-            if criterion.required
-            for criterion_id in criterion.covers_acceptance_criteria
-        }
-        # Legacy ESpecs only mapped verification at the parent requirement
-        # level. Keep those readable, while newly generated ESpecs persist
-        # criterion-level references explicitly.
-        for criterion in specification.verification:
-            if not criterion.required or criterion.covers_acceptance_criteria:
-                continue
-            for requirement_id in criterion.covers:
-                requirement = next((
-                    item for item in specification.requirements
-                    if item.requirement_id == requirement_id
-                ), None)
-                if requirement is not None:
-                    verified_acceptance_ids.update(requirement.acceptance_criterion_ids)
-        missing_acceptance_verification = (
-            sorted(all_acceptance_ids - verified_acceptance_ids)
-            if specification.status == SpecificationStatus.VALIDATED
-            else []
-        )
-        for requirement in specification.requirements:
-            if (
-                requirement.kind == RequirementKind.CONSTRAINT
-                or _is_directory_only_requirement(requirement)
-            ):
-                continue
-            for criterion_id in requirement.acceptance_criterion_ids:
-                mapped_units = acceptance_criterion_units.get(criterion_id, set())
-                if not mapped_units:
-                    # Backward compatibility for specifications created before
-                    # criterion-level implementation mappings were introduced.
-                    mapped_units = {
-                        unit.unit_id for unit in units_by_requirement.get(
-                            requirement.requirement_id, []
-                        )
-                    }
-                if mapped_units and mapped_units.issubset(covered_unit_set):
-                    covered_acceptance_criteria.append(criterion_id)
-                else:
-                    missing_acceptance_criteria.append(criterion_id)
-
-        undeclared_values = []
-        for change in plan.changes:
-            path = _path(change.path)
-            if change.change_type.value == "mkdir":
-                declared_directory = (
-                    path in directory_requirement_paths
-                    or any(
-                        architecture_path.startswith(path.rstrip("/") + "/")
-                        for architecture_path in architecture_paths
-                    )
-                    or any(
-                        _path(unit.target_path) == path
-                        for unit in specification.implementation_units
-                    )
-                )
-                if not declared_directory:
-                    undeclared_values.append(change.path)
-            elif not any(_matches_scope(path, scope) for scope in declared_scopes):
-                undeclared_values.append(change.path)
-        undeclared = tuple(sorted(undeclared_values))
+        undeclared = tuple(sorted(
+            change.path for change in plan.changes
+            if not any(_matches_scope(change.path, scope) for scope in declared_scopes)
+        ))
 
         semantic_issues = self._semantic_content_issues(plan, specification)
         return PlanSpecificationReport(
-            valid=(
-                not missing_requirements
-                and not missing_units
-                and not missing_acceptance_criteria
-                and not missing_acceptance_verification
-                and not undeclared
-                and not semantic_issues
-            ),
+            valid=not missing_requirements and not missing_units and not undeclared and not semantic_issues,
             covered_requirements=tuple(covered_requirements),
             missing_requirements=tuple(missing_requirements),
             undeclared_paths=undeclared,
@@ -443,7 +281,4 @@ class PlanSpecificationValidator:
             missing_units=tuple(missing_units),
             required_requirements=tuple(required_requirements),
             semantic_issues=semantic_issues,
-            covered_acceptance_criteria=tuple(covered_acceptance_criteria),
-            missing_acceptance_criteria=tuple(missing_acceptance_criteria),
-            missing_acceptance_verification=tuple(missing_acceptance_verification),
         )

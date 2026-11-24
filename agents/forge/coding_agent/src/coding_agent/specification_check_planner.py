@@ -14,6 +14,11 @@ from coding_agent.engineering_spec import (
 )
 
 
+def requirement_marker(requirement_id: str) -> str:
+    """Pytest marker name for a requirement ID, e.g. REQ-002 -> req_002."""
+    return re.sub(r"[^0-9a-z]+", "_", requirement_id.casefold()).strip("_")
+
+
 class SpecificationCheckPlanner:
     """Prepare executable checks without inventing tests or shell commands.
 
@@ -35,6 +40,10 @@ class SpecificationCheckPlanner:
     def prepare(self, specification: EngineeringSpecification) -> tuple[EngineeringSpecification, tuple[str, ...]]:
         requirements = {item.requirement_id: item for item in specification.requirements}
         units = {item.unit_id: item for item in specification.implementation_units}
+        python_test_paths = tuple(sorted({
+            unit.target_path for unit in specification.implementation_units
+            if unit.kind.value == "test" and Path(unit.target_path).suffix.lower() == ".py"
+        }))
         prepared = []
         notes = []
         for criterion in specification.verification:
@@ -69,6 +78,32 @@ class SpecificationCheckPlanner:
                 criterion.kind == VerificationKind.MANUAL
                 and criterion.criterion_id.startswith("VER-AUTO-")
             )
+            # A behavioral, runtime, or build criterion without a command is
+            # checked by running the tests tagged for its requirements. With no
+            # tagged test, pytest collects nothing (exit 5), so it fails rather
+            # than passing on unrelated tests.
+            behavior_requirement_ids = sorted(
+                item for item in covered_requirement_ids
+                if requirements[item].kind != RequirementKind.CONSTRAINT
+            )
+            if (
+                not criterion.command
+                and python_test_paths
+                and behavior_requirement_ids
+                and criterion.kind in {VerificationKind.BEHAVIORAL, VerificationKind.RUNTIME, VerificationKind.BUILD}
+            ):
+                markers = " or ".join(requirement_marker(item) for item in behavior_requirement_ids)
+                prepared.append(replace(
+                    criterion,
+                    kind=VerificationKind.BEHAVIORAL,
+                    command=("python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", markers, *python_test_paths),
+                    description=(
+                        f"Run the tests tagged for {', '.join(behavior_requirement_ids)} "
+                        f"(pytest -m \"{markers}\"). " + criterion.description
+                    ),
+                ))
+                notes.append(f"{criterion.criterion_id}: mapped to requirement-tagged tests ({markers})")
+                continue
             if (criterion.kind == VerificationKind.MANUAL and not generated_manual_fallback) or criterion.command:
                 prepared.append(criterion)
                 continue
@@ -134,6 +169,21 @@ class SpecificationCheckPlanner:
                     command=command,
                 ))
                 notes.append(f"{criterion.criterion_id}: deterministic artifact check prepared")
+            elif generated_manual_fallback and python_test_paths and behavior_requirement_ids:
+                # A gap-fill checklist exists only because the model supplied no
+                # check. With no artifact check available, require tagged tests
+                # for the requirement before falling back to a human checklist.
+                markers = " or ".join(requirement_marker(item) for item in behavior_requirement_ids)
+                prepared.append(replace(
+                    criterion,
+                    kind=VerificationKind.BEHAVIORAL,
+                    command=("python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", markers, *python_test_paths),
+                    description=(
+                        f"Run the tests tagged for {', '.join(behavior_requirement_ids)} "
+                        f"(pytest -m \"{markers}\"). " + criterion.description
+                    ),
+                ))
+                notes.append(f"{criterion.criterion_id}: gap-fill mapped to requirement-tagged tests ({markers})")
             else:
                 manual_description = criterion.description.rstrip() + (
                     "\nHuman evidence required: inspect the completed workspace and record the "
@@ -145,4 +195,37 @@ class SpecificationCheckPlanner:
                     description=manual_description,
                 ))
                 notes.append(f"{criterion.criterion_id}: converted to manual evidence because no safe automated check is available")
+
+        # A criterion with nothing to execute that only covers constraints is a
+        # human review item. When executable required checks exist, they decide
+        # acceptance and the review is reported without blocking. When none
+        # exist, the review is the only gate, so it stays required.
+        has_executable_gate = any(item.command and item.required for item in prepared)
+        for index, criterion in enumerate(prepared):
+            if criterion.command:
+                continue
+            covered = set()
+            for reference in criterion.covers:
+                if reference in requirements:
+                    covered.add(reference)
+                elif reference in units:
+                    covered.update(units[reference].satisfies)
+            if not covered or not all(requirements[item].kind == RequirementKind.CONSTRAINT for item in covered):
+                continue
+            should_require = not has_executable_gate
+            if criterion.required == should_require:
+                continue
+            prepared[index] = replace(
+                criterion,
+                required=should_require,
+                description=(
+                    criterion.description.replace("(non-blocking constraint)", "(constraint)")
+                    if should_require else criterion.description
+                ),
+            )
+            notes.append(
+                f"{criterion.criterion_id}: constraint-only review "
+                + ("is required because no executable check decides acceptance"
+                   if should_require else "is non-blocking; executable checks decide acceptance")
+            )
         return replace(specification, verification=tuple(prepared)), tuple(notes)

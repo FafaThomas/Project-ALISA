@@ -132,6 +132,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--journal", default=None,
         help="Change journal path (default: .coding-agent/changes.jsonl inside workspace)",
     )
+    run_parser.add_argument(
+        "--manual-evidence", default=None,
+        help=(
+            "JSON file of human PASS/FAIL evidence for manual criteria, keyed by criterion ID: "
+            '{"VER-001": {"status": "PASS", "evidence": "what you observed"}}. '
+            "Criteria not listed stay unverified. Replaces the interactive prompt."
+        ),
+    )
 
     return parser
 
@@ -164,9 +172,6 @@ def _display_plan(plan, workspace: Workspace) -> None:
     for index, change in enumerate(plan.changes, start=1):
         print(f"\n[{index}] {change.change_type.value.upper()} {change.path}")
         print(f"Reason: {change.reason}")
-        if change.change_type.value == "mkdir":
-            print("(Create directory; no file-content diff.)")
-            continue
         try:
             if change.change_type.value == "create":
                 before = ""
@@ -246,6 +251,28 @@ def _approve_retry(request: RetryRequest) -> bool:
     return answer.strip().casefold() == "yes"
 
 
+def _load_manual_evidence(path: str) -> dict[str, dict[str, str]]:
+    """Read human-supplied manual verification evidence. Nothing is inferred."""
+    try:
+        data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"--manual-evidence could not be read: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("--manual-evidence must be a JSON object keyed by criterion ID")
+    evidence: dict[str, dict[str, str]] = {}
+    for criterion_id, item in data.items():
+        if not isinstance(item, dict):
+            raise ValueError(f"manual evidence for {criterion_id} must be an object")
+        status = str(item.get("status", "")).strip().upper()
+        detail = str(item.get("evidence", "")).strip()
+        if status not in {"PASS", "FAIL"} or not detail:
+            raise ValueError(
+                f"manual evidence for {criterion_id} needs status PASS or FAIL and non-empty evidence"
+            )
+        evidence[str(criterion_id)] = {"status": status, "evidence": detail}
+    return evidence
+
+
 def _run_coding_task(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     workspace = _workspace(args.workspace)
@@ -265,15 +292,28 @@ def _run_coding_task(args: argparse.Namespace) -> int:
     if not journal_path.is_absolute():
         journal_path = workspace.root / journal_path
 
+    manual_evidence = (
+        _load_manual_evidence(args.manual_evidence) if args.manual_evidence else None
+    )
+    manual_handler = (
+        (lambda criteria: {
+            item.criterion_id: manual_evidence[item.criterion_id]
+            for item in criteria
+            if item.criterion_id in manual_evidence
+        })
+        if manual_evidence is not None
+        else _collect_manual_verification
+    )
+
     journal = ChangeJournal(journal_path)
     coordinator = ChangeCoordinator(workspace, journal=journal)
     runner = CommandRunner(workspace, timeout=args.timeout)
-    llm_client = (
-        OllamaClient()
-        if args.llm_timeout is None
-        else OllamaClient(timeout=args.llm_timeout)
+    client_options = (
+        {} if args.llm_timeout is None else {"timeout": args.llm_timeout}
     )
-    planner = CodingPlanner(client=llm_client)
+    planning_client = OllamaClient(role="planning", **client_options)
+    coding_client = OllamaClient(role="coding", **client_options)
+    planner = CodingPlanner(client=coding_client)
     context_engine = ContextEngine(
         workspace,
         max_files=args.max_context_files,
@@ -286,16 +326,20 @@ def _run_coding_task(args: argparse.Namespace) -> int:
         verification_engine=VerificationEngine(),
         context_engine=context_engine,
         retry_policy=RetryPolicy(max_attempts=args.max_attempts),
+        specification_client=planning_client,
     )
 
     print(f"Task: {task.task_id}")
     print(f"Workspace: {workspace.root}")
-    print("Building context and asking the configured Ollama model to plan...")
+    print(
+        "Building context: planning model will design the architecture and implementation plan; "
+        "coding model will generate the implementation..."
+    )
     result = orchestrator.run(
         task,
         approval_handler=lambda plan: _approve_plan(plan, workspace),
         retry_handler=_approve_retry,
-        manual_verification_handler=_collect_manual_verification,
+        manual_verification_handler=manual_handler,
     )
 
     print(f"\nTASK STATUS: {result.status.value.upper()}")

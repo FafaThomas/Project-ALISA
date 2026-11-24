@@ -14,7 +14,11 @@ from urllib.request import Request, urlopen
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 DEFAULT_TIMEOUT_SECONDS = 300.0
-DEFAULT_NUM_PREDICT = 4096
+DEFAULT_NUM_PREDICT = 8192  # Engineering Specification integration JSON exceeds 4096 tokens for multi-requirement tasks.
+# Ollama's default context window is far smaller than the planning prompts
+# (often 25k+ characters). Without an explicit num_ctx, Ollama silently
+# truncates the start of the prompt, dropping the task and specification.
+DEFAULT_NUM_CTX = 16384
 PROGRESS_LOG_INTERVAL_SECONDS = 30.0
 LOGGER = logging.getLogger(__name__)
 
@@ -53,16 +57,30 @@ class OllamaClient:
         base_url: str | None = None,
         timeout: float | None = None,
         num_predict: int | None = None,
+        role: str = "coding",
     ) -> None:
         load_local_env()
 
-        # Keep the Coding Agent's model independently configurable so changing
-        # this agent does not silently change other ALISA components.
-        self.model = (
-            model
-            or os.getenv("CODING_AGENT_OLLAMA_MODEL")
-            or os.getenv("OLLAMA_MODEL")
-        )
+        if role not in {"planning", "coding"}:
+            raise ValueError("role must be either 'planning' or 'coding'")
+        self.role = role
+
+        # Planning and implementation are separate model roles. Explicit model
+        # arguments remain highest priority; otherwise each role uses its own
+        # setting and falls back to the shared ALISA model for compatibility.
+        if model is not None:
+            self.model = model
+        elif role == "planning":
+            self.model = (
+                os.getenv("PLANNING_OLLAMA_MODEL")
+                or os.getenv("OLLAMA_MODEL")
+                or os.getenv("CODING_AGENT_OLLAMA_MODEL")
+            )
+        else:
+            self.model = (
+                os.getenv("CODING_AGENT_OLLAMA_MODEL")
+                or os.getenv("OLLAMA_MODEL")
+            )
         self.base_url = (
             base_url or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         ).rstrip("/")
@@ -106,13 +124,50 @@ class OllamaClient:
         if isinstance(num_predict, bool) or not isinstance(num_predict, int) or num_predict < 1:
             raise ValueError("num_predict must be a positive integer.")
         self.num_predict = num_predict
+
+        configured_num_ctx = os.getenv("CODING_AGENT_OLLAMA_NUM_CTX")
+        try:
+            num_ctx = (
+                int(configured_num_ctx)
+                if configured_num_ctx is not None
+                else DEFAULT_NUM_CTX
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "CODING_AGENT_OLLAMA_NUM_CTX must be a positive integer."
+            ) from exc
+        if num_ctx < 1:
+            raise ValueError("CODING_AGENT_OLLAMA_NUM_CTX must be a positive integer.")
+        self.num_ctx = num_ctx
         self.last_request_duration_seconds: float | None = None
 
         if not self.model:
+            role_setting = (
+                "PLANNING_OLLAMA_MODEL" if role == "planning"
+                else "CODING_AGENT_OLLAMA_MODEL"
+            )
             raise ValueError(
-                "Specify a model or set CODING_AGENT_OLLAMA_MODEL "
+                f"Specify a model or set {role_setting} "
                 "(or the shared OLLAMA_MODEL fallback) in the project .env."
             )
+
+    def unload(self) -> bool:
+        """Ask Ollama to unload this model, freeing VRAM before another role runs."""
+        payload = {"model": self.model, "keep_alive": 0}
+        request = Request(
+            f"{self.base_url}/api/generate",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=min(self.timeout, 30.0)) as response:
+                response.read()
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            LOGGER.warning("Could not unload Ollama model %s: %s", self.model, exc)
+            return False
+        LOGGER.info("Unloaded Ollama model %s", self.model)
+        return True
 
     def generate_json(
         self, prompt: str, *, schema: Mapping[str, object] | None = None
@@ -143,7 +198,7 @@ class OllamaClient:
             # Stream token chunks so a long generation does not appear frozen
             # until Ollama has finished constructing the entire JSON response.
             "stream": True,
-            "options": {"num_predict": self.num_predict},
+            "options": {"num_predict": self.num_predict, "num_ctx": self.num_ctx},
         }
 
         request = Request(
@@ -236,12 +291,15 @@ class OllamaClient:
         response_content = "".join(content_parts)
         LOGGER.info(
             "Ollama request completed in %.2fs (model=%s, timeout=%.1fs, "
-            "prompt_chars=%d, response_chars=%d, eval_count=%s, done_reason=%s)",
+            "prompt_chars=%d, response_chars=%d, num_ctx=%d, prompt_eval_count=%s, "
+            "eval_count=%s, done_reason=%s)",
             elapsed,
             self.model,
             self.timeout,
             len(prompt),
             len(response_content),
+            self.num_ctx,
+            final_record.get("prompt_eval_count", "unknown"),
             final_record.get("eval_count", "unknown"),
             final_record.get("done_reason", "unknown"),
         )

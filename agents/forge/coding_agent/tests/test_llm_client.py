@@ -36,6 +36,67 @@ def test_explicit_model_argument_has_highest_precedence(monkeypatch):
     assert client.model == "llama3.1:8b"
 
 
+def test_planning_role_prefers_planning_model(monkeypatch):
+    monkeypatch.setenv("PLANNING_OLLAMA_MODEL", "qwen3:8b")
+    monkeypatch.setenv("CODING_AGENT_OLLAMA_MODEL", "qwen2.5-coder:7b")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:14b")
+
+    client = OllamaClient(role="planning")
+
+    assert client.model == "qwen3:8b"
+    assert client.role == "planning"
+
+
+def test_planning_role_falls_back_to_shared_model(monkeypatch):
+    monkeypatch.setattr("coding_agent.llm_client.load_local_env", lambda: None)
+    monkeypatch.delenv("PLANNING_OLLAMA_MODEL", raising=False)
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:14b")
+
+    client = OllamaClient(role="planning")
+
+    assert client.model == "qwen2.5:14b"
+
+
+def test_explicit_model_overrides_role_environment(monkeypatch):
+    monkeypatch.setenv("PLANNING_OLLAMA_MODEL", "qwen3:8b")
+
+    client = OllamaClient(model="custom-model:latest", role="planning")
+
+    assert client.model == "custom-model:latest"
+
+
+def test_rejects_unknown_model_role():
+    with pytest.raises(ValueError, match="role must be either"):
+        OllamaClient(model="test-model", role="review")
+
+
+def test_unload_requests_immediate_model_release(monkeypatch):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("coding_agent.llm_client.urlopen", fake_urlopen)
+    client = OllamaClient(model="planner-model", base_url="http://localhost:11434")
+
+    assert client.unload() is True
+    assert captured["url"] == "http://localhost:11434/api/generate"
+    assert captured["payload"] == {"model": "planner-model", "keep_alive": 0}
+
+
 class _StreamingResponse:
     def __init__(self, records):
         self._lines = [json.dumps(item).encode("utf-8") + b"\n" for item in records]

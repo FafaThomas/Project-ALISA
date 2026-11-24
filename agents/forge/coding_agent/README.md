@@ -91,9 +91,31 @@ coding-agent run "D:\path\to\workspace" "Add input validation" `
   --acceptance-criteria "Invalid email addresses are rejected"
 ```
 
-The `run` command uses `OLLAMA_MODEL` and optional `OLLAMA_HOST` environment
-settings (or the ALISA project `.env`). It does not accept a non-interactive
-approval flag. Only the exact response `yes` authorizes the displayed plan.
+The `run` command supports separate Ollama model roles configured in the ALISA
+project `.env`:
+
+- `PLANNING_OLLAMA_MODEL`: runs both planning sub-phases using the same model:
+  **Architecture Design** (cohesive modules, responsibilities, file ownership,
+  and dependencies), followed by **Implementation Planning** (contracts, work
+  packages, sequencing dependencies, and verification criteria).
+- `CODING_AGENT_OLLAMA_MODEL`: performs the separate **Coding** phase, generating
+  implementation changes from the validated specification and handling
+  implementation-plan repairs.
+- `OLLAMA_MODEL`: shared fallback for either role when its dedicated setting is
+  absent.
+- `OLLAMA_HOST`: Ollama server URL shared by both roles.
+
+The planning client prefers `PLANNING_OLLAMA_MODEL`; the coding client prefers
+`CODING_AGENT_OLLAMA_MODEL`. Both fall back to `OLLAMA_MODEL`. Explicit model
+arguments take precedence. The planning model first produces an Architecture
+Design artifact, which passes deterministic checks for duplicate file ownership,
+explicitly requested separation of responsibilities, and catch-all modules.
+Only then does it produce the Implementation Plan. These artifacts are retained
+under `.coding-agent/diagnostics/<task-id>/architecture_design.json` and
+`implementation_plan.json`. The planner is unloaded before the coding model is
+invoked, allowing the two models to run sequentially on limited VRAM. The command
+does not accept a non-interactive approval flag. Only the exact response `yes`
+authorizes the displayed implementation plan.
 Approved file operations are journaled under `.coding-agent/changes.jsonl` by
 default. Verification commands are shown before approval and run with the
 workspace as their working directory, without a shell. Failed verification

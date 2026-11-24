@@ -13,3 +13,15 @@ __all__ = [
     "IntegrationStagePayload",
     "RequirementsStagePayload",
 ]
+
+from coding_agent.schemas.verification import (
+    EvidenceSource,
+    VerificationEvidenceRecord,
+    VerificationEvidenceStatus,
+)
+
+__all__ += [
+    "EvidenceSource",
+    "VerificationEvidenceRecord",
+    "VerificationEvidenceStatus",
+]

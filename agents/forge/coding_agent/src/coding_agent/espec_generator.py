@@ -6,10 +6,9 @@ import json
 import inspect
 from pathlib import Path, PurePosixPath
 import re
-from typing import Any, Callable, Mapping, Type
+from typing import Any, Callable, Mapping
 
-from pydantic import BaseModel
-
+from coding_agent.architecture_validator import ArchitectureDesignValidator
 from coding_agent.engineering_spec import (
     ArchitectureModule,
     EngineeringSpecification,
@@ -30,6 +29,14 @@ from coding_agent.schemas.espec import (
     IntegrationStagePayload,
     RequirementsStagePayload,
 )
+
+
+_STAGE_PAYLOAD_MODELS = {
+    "requirements": RequirementsStagePayload,
+    "architecture": ArchitectureStagePayload,
+    "contracts": ContractsStagePayload,
+    "integration": IntegrationStagePayload,
+}
 
 
 # Ollama accepts a JSON Schema object in /api/chat's ``format`` field. These
@@ -120,11 +127,6 @@ def integration_json_schema(
 ) -> dict[str, Any]:
     """Build the integration schema using IDs and paths from prior stages."""
     requirement_ids = sorted(item.requirement_id for item in requirements)
-    acceptance_criterion_ids = sorted(
-        criterion_id
-        for requirement in requirements
-        for criterion_id in requirement.acceptance_criterion_ids
-    )
     contract_ids = sorted(item.contract_id for item in contracts)
     architecture_paths = {
         path.replace("\\", "/")
@@ -151,7 +153,14 @@ def integration_json_schema(
                 "type": "string",
                 "enum": ["source", "test", "configuration", "documentation", "asset"],
             },
-            "depends_on": _string_array_schema(),
+            "depends_on": {
+                **_string_array_schema(),
+                "description": (
+                    "Implementation-unit dependencies only: each value must be a unit_id "
+                    "from implementation_units in this same response (for example UNIT-001). "
+                    "Never put CON-IDs here; contract IDs belong in implements."
+                ),
+            },
             "satisfies": _array_schema({"type": "string", "enum": requirement_ids}),
             # Ollama rejects enum=[]. When no contracts were generated, the
             # only valid implementation is to reference no contracts at all.
@@ -161,16 +170,10 @@ def integration_json_schema(
                 else {**_string_array_schema(), "maxItems": 0}
             ),
             "acceptance_criteria": _string_array_schema(),
-            "implements_acceptance_criteria": (
-                _array_schema({"type": "string", "enum": acceptance_criterion_ids})
-                if acceptance_criterion_ids
-                else {**_string_array_schema(), "maxItems": 0}
-            ),
         },
         [
             "unit_id", "title", "target_path", "kind", "depends_on",
             "satisfies", "implements", "acceptance_criteria",
-            "implements_acceptance_criteria",
         ],
     )
     verification_schema = _object_schema(
@@ -186,13 +189,8 @@ def integration_json_schema(
             # Direct requirement coverage is sufficient and avoids requiring
             # the model to predict implementation-unit IDs in another field.
             "covers": _array_schema({"type": "string", "enum": requirement_ids}),
-            "covers_acceptance_criteria": (
-                _array_schema({"type": "string", "enum": acceptance_criterion_ids})
-                if acceptance_criterion_ids
-                else {**_string_array_schema(), "maxItems": 0}
-            ),
         },
-        ["criterion_id", "description", "kind", "required", "command", "covers", "covers_acceptance_criteria"],
+        ["criterion_id", "description", "kind", "required", "command", "covers"],
     )
     return _object_schema(
         {
@@ -291,6 +289,7 @@ Classify requirements by what the requirement obligates the implementation to do
 - functional: a product capability or concrete project artifact that must be created or changed.
 - non_functional: a quality attribute of the product or artifact, such as security, reliability, performance, compatibility, or maintainability. It still needs implementation-unit coverage.
 - constraint: a boundary, prohibition, preservation rule, reporting obligation, environment condition, or verification-only obligation that constrains or checks the work but does not itself require a product artifact to be created or changed. It requires verification coverage, not an implementation unit.
+- Classify statements such as "Existing code and configuration files are preserved" as constraints when they only protect pre-existing workspace contents; do not invent a file-change unit for a preservation-only rule.
 In particular, classify a negative technology prohibition as a constraint when it only forbids an implementation choice and does not direct this work package to create or modify a concrete artifact. For example, "Do not use SQLite for runtime" or "the runtime must not use SQLite" is a constraint when no application database configuration is being implemented in this work package. By contrast, "configure Django to connect to PostgreSQL through environment variables" is a functional implementation requirement. Do not label a prohibition non_functional merely because it describes an undesirable runtime property.
 In particular, requirements phrased solely as "verify/check/validate/report whether X" are verification-only constraints, not non-functional implementation requirements. For example, "verify Compose syntax if Docker is available" is a constraint; "the Compose configuration must use a valid supported syntax" is a non-functional requirement if it describes a quality property of the delivered artifact.
 Split mixed requirements when one part requires a concrete implementation and another part is only a prohibition or preservation rule. Do not combine a later work package's implementation task with the current package's guardrail. For every functional or non-functional requirement, name the concrete file or artifact to create or modify in its description and at least one acceptance criterion whenever that target is known from the objective, constraints, or project context. Use canonical paths and filenames (for example, docker-compose.yml, not a vague phrase such as "service configuration"). For service startup dependencies and health-conditioned Compose ordering, explicitly identify docker-compose.yml as the implementation target when Compose is part of the approved stack.
@@ -301,7 +300,6 @@ USER ACCEPTANCE CRITERIA: {list(acceptance_criteria)}
 PROJECT CONTEXT: {project_context}""",
             lambda d: self._parse_requirements(d),
             schema=REQUIREMENTS_JSON_SCHEMA,
-            payload_model=RequirementsStagePayload,
         )
         requirements = requirements_data
 
@@ -311,36 +309,77 @@ PROJECT CONTEXT: {project_context}""",
             if mandatory_architecture_paths
             else "- None inferred from explicit file requirements."
         )
+        # PHASE 1 — ARCHITECTURE DESIGN
+        # Requirements are inputs to the architecture phase. The architecture
+        # is validated and persisted before implementation planning begins.
         architecture = self._stage(
             "architecture", trace,
-            f"""Design a minimal coherent modular architecture satisfying the requirements.
+            f"""PHASE: ARCHITECTURE DESIGN
+Design the application's architecture, not its implementation task list.
 Return JSON: {{"architecture":[{{"module_id":"MOD-001","name":"...","responsibility":"...","depends_on":[],"file_paths":["relative/path"]}}]}}
-Use workspace-relative file paths. List concrete files, not vague directory labels. Every concrete filename positively required to be created or modified in a requirement or acceptance criterion MUST appear in architecture file_paths, in the correct module. Do NOT list files that the requirement explicitly says must NOT be created, added, committed, or included. For example, a requirement to create root .env.example while explicitly prohibiting a real .env requires .env.example and forbids .env; do not declare .env as a deliverable. For example, if a requirement says root docker-compose.yml, include exactly docker-compose.yml in the Root module. If a requirement calls for root, frontend, and backend .dockerignore files, include all three exact paths. Include appropriate test files in the relevant modules when tests are required by the requirements. Use consistent canonical names and extensions (for example, docker-compose.yml is not docker-compose.yaml). Dependencies must reference module IDs in this response. Avoid unnecessary modules.
+
+ARCHITECTURE DESIGN RULES:
+- Organize modules by cohesive responsibility, not by repository or folder ownership.
+- A module must have one clear responsibility. Do not create a catch-all root/repository module that owns application logic, rendering/UI, entry-point orchestration, configuration, documentation, and tests together.
+- When requirements say logic must be independent of rendering/UI, place those responsibilities in different modules. Apply the same rule to explicitly separated domain, presentation, and persistence responsibilities.
+- Keep application entry-point/orchestration files distinct from core domain logic when the task describes independently testable core logic.
+- Put tests in a test-focused module or the appropriate module's test area; do not assign test files to an application runtime module merely because they are in the same repository.
+- Put documentation and dependency/configuration artifacts in a cohesive project-support module when appropriate; they do not justify merging unrelated runtime modules.
+- Define module dependencies in the direction that actual imports/calls should flow. Avoid circular dependencies.
+- Do not create a separate module for every file when several files implement one cohesive responsibility. Prefer a small number of meaningful modules.
+- Every concrete file path must have exactly one owning module.
+
+Use workspace-relative file paths. List concrete files, not vague directory labels. Every concrete filename positively required to be created or modified in a requirement or acceptance criterion MUST appear in architecture.file_paths, in the correct module. Do NOT list files that the requirement explicitly says must NOT be created, added, committed, or included. Use consistent canonical names and extensions. Dependencies must reference module IDs in this response.
 MANDATORY FILE PATHS DERIVED FROM THE REQUIREMENTS (every path below MUST appear in architecture.file_paths):
 {mandatory_paths_text}
-Assign root-level files to the root/repository module. Assign service-specific files to the module responsible for that service. Do not omit a mandatory path merely because it appears in an acceptance criterion rather than the requirement description.
+Assign service-specific files to the module responsible for that service. Do not omit a mandatory path merely because it appears in an acceptance criterion rather than the requirement description.
 OBJECTIVE: {objective}
+CONSTRAINTS: {list(constraints)}
+ACCEPTANCE CRITERIA: {list(acceptance_criteria)}
 REQUIREMENTS: {[self._requirement_dict(x) for x in requirements]}
 PROJECT CONTEXT: {project_context}""",
-            lambda data: self._parse_architecture(data, requirements),
+            lambda data: self._parse_and_validate_architecture(
+                data, requirements, objective=objective, constraints=constraints,
+                acceptance_criteria=acceptance_criteria,
+            ),
             schema=ARCHITECTURE_JSON_SCHEMA,
-            payload_model=ArchitectureStagePayload,
         )
+        architecture_report = ArchitectureDesignValidator().validate(
+            architecture, objective=objective, requirements=requirements,
+            constraints=constraints, acceptance_criteria=acceptance_criteria,
+        )
+        self._write_diagnostic("architecture_design.json", {
+            "phase": "architecture_design",
+            "objective": objective,
+            "requirements": [self._requirement_dict(item) for item in requirements],
+            "modules": [self._module_dict(item) for item in architecture],
+            "validation": architecture_report.to_dict(),
+        })
 
+        # PHASE 2 — IMPLEMENTATION PLANNING
+        # The planning stages may decompose and sequence work, but must not
+        # redesign the approved architecture from phase 1.
         self._known_module_ids = {module.module_id for module in architecture}
         contracts = self._stage(
             "contracts", trace,
-            f"""Define explicit interfaces and data contracts between the proposed modules, only where such interfaces genuinely exist.
+            f"""PHASE: IMPLEMENTATION PLANNING — CONTRACTS
+Define explicit interfaces and data contracts between the approved architecture modules, only where such interfaces genuinely exist. Do not merge, rename, or reassign architecture modules in this phase.
 Return JSON: {{"contracts":[{{"contract_id":"CON-001","owner":"MOD-001","name":"...","kind":"component|function|data|api|event","inputs":[{{"name":"...","type_name":"...","required":true,"description":""}}],"outputs":[{{"name":"...","type_name":"...","required":true,"description":""}}],"invariants":["..."]}}]}}
 Do not create contracts for workspace inspection, file creation checklists, verification commands, reporting obligations, prohibitions, preservation rules, or scope guardrails. Those are requirements/verification concerns, not software interfaces. Infrastructure scaffolding and documentation tasks may legitimately have an empty contracts array. Every returned contract owner must reference an architecture module. Make actual interfaces compatible and unambiguous.
 REQUIREMENTS: {[self._requirement_dict(x) for x in requirements]}
 ARCHITECTURE: {[self._module_dict(x) for x in architecture]}""",
             self._parse_contracts,
             schema=CONTRACTS_JSON_SCHEMA,
-            payload_model=ContractsStagePayload,
         )
 
-        required_path_mapping = self._required_architecture_paths(requirements)
+        architecture_paths = {
+            path.replace("\\", "/")
+            for module in architecture
+            for path in module.file_paths
+        }
+        required_path_mapping = self._required_architecture_paths(
+            requirements, architecture_paths
+        )
         required_path_mapping_text = (
             "\\n".join(
                 f"- {path}: {', '.join(sorted(requirement_ids))}"
@@ -360,14 +399,15 @@ ARCHITECTURE: {[self._module_dict(x) for x in architecture]}""",
         )
         integration = self._stage(
             "integration", trace,
-            f"""Create implementation units and verification criteria that integrate this design.
+            f"""PHASE: IMPLEMENTATION PLANNING — WORK PACKAGES AND VERIFICATION
+Create implementation units and verification criteria that execute the approved architecture. Do not redesign the architecture, combine unrelated modules, or invent alternate target paths.
 Create implementation units for every functional and non-functional requirement. Constraint requirements are NOT file-creation tasks and do not require implementation units; they MUST still have explicit verification criteria.
 For every requirement that names multiple concrete files, create a separate implementation unit for EACH named file. Do not bundle root/frontend/backend .dockerignore files into one unit. A unit has exactly one target_path. Multiple units may satisfy the same REQ-ID.
 PATH CONTRACT (mandatory):
 - All paths are relative to the workspace root. Never prepend "root/" or another workspace-folder name.
 - For work that creates or changes a file, target_path MUST exactly match one concrete file path in ARCHITECTURE.file_paths.
-- When a directory-layout requirement also names files, create concrete file units for those files beneath the required directories. Do not attach directory existence to incidental child-file units.
-- Do not use "." as an implementation target or mkdir target; workspace inspection is not a directory-creation operation. Directory-only deliverables remain structural requirements and are represented by explicit mkdir operations in the implementation plan; do not invent marker files.
+- Directory layout requirements must be represented by concrete file units beneath each required directory; do not create a unit targeting "." merely to represent workspace inspection or root layout.
+- Do not use "." as an implementation target. The planner can propose file changes, not standalone directory operations. If a directory-only deliverable has no concrete file beneath it, report the ESpec gap instead of inventing a marker file.
 - Do not invent alternate filenames or extensions. Include test paths explicitly in ARCHITECTURE before creating test implementation units.
 For each required file path named by a requirement, create at least one unit satisfying that requirement whose target_path is exactly that file path.
 AUTHORITATIVE REQUIRED-FILE MAPPING (path -> requirement ID(s)):
@@ -380,14 +420,21 @@ Do NOT create implementation units for workspace inspection, verification, synta
 Verification-only activities such as "Verify Docker Compose Syntax" belong in verification[], never in implementation_units[].
 Use these mappings when assigning implementation_units[].satisfies. Do not assign a file unit to an unrelated requirement merely because it shares a nearby concern.
 Verification criteria must cover only requirements their descriptions and checks genuinely verify. Do not use generic overlap such as "root directory" or "file exists" as evidence that a criterion verifies a specific directory or file requirement.
+A test unit's satisfies must list every functional or non-functional requirement whose behavior its tests check. A requirement satisfied by a test unit is verified by running that test file, so an unlisted requirement falls back to a manual checklist.
 
 IMPORTANT: The "kind" fields in this response belong to different enums and MUST NOT be copied between objects:
 - requirements[].kind classifies the requirement: functional, non_functional, or constraint.
 - implementation_units[].kind classifies the artifact being created: source, test, configuration, documentation, or asset.
 - verification[].kind classifies the verification method: static, structural, build, behavioral, runtime, or manual.
-A requirement whose kind is "constraint" does NOT make its implementation unit kind "constraint". For example, implementing a Docker Compose requirement produces an implementation unit with kind "configuration"; implementing a test requirement produces kind "test"; implementing application code produces kind "source". Choose implementation_units[].kind from the artifact's actual nature, not from the requirement it satisfies.
+A requirement whose kind is "constraint" does NOT make its implementation unit kind "constraint". For example, implementing a Docker Compose requirement produces an implementation unit with kind "configuration"; implementing a test requirement produces kind "test"; implementing application code produces kind "source". Choose implementation_units[].kind from the artifact's actual nature, not from the requirement it satisfies. Python files whose primary purpose is application configuration (for example, Django settings.py or config.py) are "configuration", not "source", even though they use a .py extension.
 
-Return JSON: {{"implementation_units":[{{"unit_id":"UNIT-001","title":"...","target_path":"relative/path","kind":"source|test|configuration|documentation|asset","depends_on":[],"satisfies":["REQ-001"],"implements":["CON-001"],"acceptance_criteria":["..."],"implements_acceptance_criteria":["REQ-001-AC-a1b2c3d4e5f6"]}}],"verification":[{{"criterion_id":"VER-001","description":"...","kind":"static|structural|build|behavioral|runtime|manual","required":true,"command":[],"covers":["REQ-001","UNIT-001"],"covers_acceptance_criteria":["REQ-001-AC-a1b2c3d4e5f6"]}}]}}
+Return JSON: {{"implementation_units":[{{"unit_id":"UNIT-001","title":"...","target_path":"relative/path","kind":"source|test|configuration|documentation|asset","depends_on":[],"satisfies":["REQ-001"],"implements":["CON-001"],"acceptance_criteria":["..."]}}],"verification":[{{"criterion_id":"VER-001","description":"...","kind":"static|structural|build|behavioral|runtime|manual","required":true,"command":[],"covers":["REQ-001","UNIT-001"]}}]}}
+IDENTIFIER NAMESPACES ARE DISTINCT AND MUST NEVER BE MIXED:
+- implementation_units[].depends_on contains ONLY implementation unit IDs (UNIT-001, UNIT-002, etc.) from implementation_units in THIS response. It describes which other implementation units must be completed first. Use [] when there is no prerequisite implementation unit.
+- implementation_units[].implements contains ONLY contract IDs (CON-001, CON-002, etc.) from CONTRACTS. It describes which interfaces/contracts this unit implements.
+- NEVER put a CON-ID in depends_on. NEVER put a UNIT-ID in implements.
+- A contract owned by the same architecture module as a unit is not a dependency of that unit. It is an interface that the unit implements, so reference it through implements.
+- Example: if UNIT-002 implements CON-001 and depends on UNIT-001, write "depends_on":["UNIT-001"] and "implements":["CON-001"].
 Use only the canonical verification kinds listed above. API, unit, integration, end-to-end,
 and generic tests use "behavioral"; linting and type checks use "static"; smoke checks use
 "runtime"; human review uses "manual".
@@ -395,13 +442,12 @@ For every verification criterion with kind "manual", command MUST be an empty ar
 Put all human inspection actions and step-by-step instructions in the description field.
 The command field is reserved for executable command arguments for non-manual criteria;
 never put natural-language instructions in command.
-All references must point to IDs supplied below. Every functional and non-functional requirement must be covered by at least one implementation unit. Every acceptance criterion has a stable ID shown in REQUIREMENTS as acceptance_criterion_ids. Each implementation unit MUST list the exact acceptance criterion IDs it implements in implements_acceptance_criteria; do not claim criteria merely because the unit satisfies the parent requirement. Each acceptance criterion MUST also be covered by one or more verification criteria using covers_acceptance_criteria. A verification criterion may additionally cover a requirement directly by listing its REQ-ID in "covers", or indirectly by listing a UNIT-ID whose "satisfies" includes that requirement. Prefer direct references where practical. Ensure each implementation unit's target_path is consistent with the architecture paths supplied below. Do not execute commands or modify files.
+All references must point to IDs supplied below. Every functional and non-functional requirement must be covered by at least one implementation unit. Every requirement, including constraints, must be covered by at least one verification criterion. A verification criterion may cover a requirement directly by listing its REQ-ID in "covers", or indirectly by listing a UNIT-ID whose "satisfies" includes that requirement. Prefer direct REQ-ID coverage when practical. Ensure each implementation unit's target_path is consistent with the architecture paths supplied below. Do not execute commands or modify files.
 REQUIREMENTS: {[self._requirement_dict(x) for x in requirements]}
 ARCHITECTURE: {[self._module_dict(x) for x in architecture]}
 CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             lambda data: self._parse_integration(data, requirements, architecture, contracts),
             schema=integration_json_schema(requirements, architecture, contracts),
-            payload_model=IntegrationStagePayload,
         )
         units, verification = integration
 
@@ -427,6 +473,23 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         )
         self._validate_coverage(spec)
         spec = replace(spec, status=SpecificationStatus.VALIDATED)
+        self._write_diagnostic("implementation_plan.json", {
+            "phase": "implementation_planning",
+            "specification_id": spec.specification_id,
+            "task_id": spec.task_id,
+            "architecture_modules": [self._module_dict(item) for item in spec.architecture],
+            "requirements": [self._requirement_dict(item) for item in spec.requirements],
+            "contracts": [self._contract_dict(item) for item in spec.contracts],
+            "implementation_units": [self._unit_dict(item) for item in spec.implementation_units],
+            "verification": [self._verification_dict(item) for item in spec.verification],
+            "validation": {
+                "status": spec.status.value,
+                "requirement_coverage": "validated",
+                "implementation_unit_coverage": "validated",
+                "verification_coverage": "validated",
+                "architecture_validation": architecture_report.to_dict(),
+            },
+        })
         self.last_trace = tuple(trace)
         self._write_diagnostic("generation_trace.json", self._trace_payload(trace))
         return spec
@@ -461,7 +524,6 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         parser: Callable,
         *,
         schema: Mapping[str, Any] | None = None,
-        payload_model: Type[BaseModel] | None = None,
     ):
         last_error = ""
         previous_response = None
@@ -498,14 +560,15 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 response_saved = self._write_diagnostic(f"{name}_attempt_{attempt}.json", response)
                 if not isinstance(response, Mapping):
                     raise ValueError("response must be a JSON object")
-                if payload_model is not None:
-                    # Validate the model boundary before domain parsing. Keep the
-                    # existing parser as the authority for normalization and
-                    # engineering-specific semantic checks.
-                    response = payload_model.model_validate(response).model_dump(
-                        mode="python"
+                payload_model = _STAGE_PAYLOAD_MODELS.get(name)
+                parser_input = (
+                    payload_model.model_validate(response).model_dump(
+                        mode="python", exclude_none=True
                     )
-                result = parser(response)
+                    if payload_model is not None
+                    else response
+                )
+                result = parser(parser_input)
                 self._write_diagnostic(f"{name}.json", response)
                 trace.append(GenerationTrace(name, attempt, True))
                 self.last_trace = tuple(trace)
@@ -565,6 +628,30 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         )
         return implementation_directive is None
 
+    @staticmethod
+    def _is_preservation_only_requirement(description, acceptance_criteria):
+        """Recognize preservation guardrails that do not request a new artifact."""
+        text = " ".join((str(description), *map(str, acceptance_criteria))).casefold()
+        preserves_existing_artifacts = (
+            re.search(
+                r"\b(?:preserve|preserved|preservation|retain|retained|"
+                r"remain(?:s|ed)\s+unchanged|keep\s+.+?\s+intact)\b",
+                text,
+            )
+            and re.search(r"\b(?:existing|pre[- ]existing|current)\b", text)
+            and re.search(
+                r"\b(?:code|source|configuration|config|files?|artifacts?|settings?)\b",
+                text,
+            )
+        )
+        implementation_directive = re.search(
+            r"\b(?:create|add|implement|modify|update|write|configure|migrate|"
+            r"replace|refactor)\b",
+            str(description),
+            re.IGNORECASE,
+        )
+        return bool(preserves_existing_artifacts and not implementation_directive)
+
     def _parse_requirements(self, data):
         result = []
         repairs = []
@@ -572,6 +659,22 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             description = x["description"]
             acceptance_criteria = tuple(x.get("acceptance_criteria", ()))
             kind = RequirementKind(x.get("kind", "functional"))
+            if (
+                kind != RequirementKind.CONSTRAINT
+                and self._is_preservation_only_requirement(
+                    description, acceptance_criteria
+                )
+            ):
+                repairs.append({
+                    "requirement_id": x["requirement_id"],
+                    "previous_kind": kind.value,
+                    "kind": RequirementKind.CONSTRAINT.value,
+                    "reason": (
+                        "the requirement protects existing project artifacts and does not "
+                        "request a new or modified deliverable"
+                    ),
+                })
+                kind = RequirementKind.CONSTRAINT
             # An explicit instruction to add/create/write tests is itself a
             # concrete artifact obligation, not merely a compliance boundary.
             if (
@@ -608,7 +711,9 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 kind=kind,
                 acceptance_criteria=acceptance_criteria,
                 priority=x.get("priority", "normal"),
-                acceptance_criterion_ids=tuple(x.get("acceptance_criterion_ids", ())),))
+                acceptance_criterion_ids=tuple(
+                    x.get("acceptance_criterion_ids", ())
+                )))
         self._unique_ids(result, "requirement_id")
         if repairs:
             self._write_diagnostic("requirements_normalization.json", repairs)
@@ -650,7 +755,7 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             preceding_clause = text[clause_start:match.start()]
             prohibits_creation = re.search(
                 r"\b(?:do\s+not|don't|must\s+not|should\s+not|never)\s+"
-                r"(?:create|add|include|generate|write|commit)\b",
+                r"(?:be\s+)?(?:creat(?:e|ed)|add(?:ed)?|includ(?:e|ed)|generat(?:e|ed)|writ(?:e|ten)|commit(?:ted)?)\b",
                 preceding_clause,
                 re.IGNORECASE,
             )
@@ -689,10 +794,14 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             re.IGNORECASE,
         )
         result = set()
-        for match in pattern.finditer(text):
-            token = match.group(0).replace("\\", "/")
-            if "/" in token or re.search(r"\broot\b", text, re.IGNORECASE):
-                continue
+        prohibited_pattern = re.compile(
+            r"\b(?:do\s+not|don't|must\s+not|should\s+not|never)\s+"
+            r"(?:be\s+)?(?:creat(?:e|ed)|add(?:ed)?|includ(?:e|ed)|"
+            r"generat(?:e|ed)|writ(?:e|ten)|commit(?:ted)?)\b",
+            re.IGNORECASE,
+        )
+
+        def is_prohibited_reference(match):
             clause_start = max(
                 text.rfind(".", 0, match.start()),
                 text.rfind(";", 0, match.start()),
@@ -700,15 +809,30 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 text.rfind("?", 0, match.start()),
                 -1,
             ) + 1
-            preceding_clause = text[clause_start:match.start()]
-            if re.search(
-                r"\b(?:do\s+not|don't|must\s+not|should\s+not|never)\s+"
-                r"(?:create|add|include|generate|write|commit)\b",
-                preceding_clause,
-                re.IGNORECASE,
-            ):
+            clause_ends = [
+                position for position in (
+                    text.find(".", match.end()),
+                    text.find(";", match.end()),
+                    text.find("!", match.end()),
+                    text.find("?", match.end()),
+                )
+                if position >= 0
+            ]
+            clause_end = min(clause_ends, default=len(text))
+            return bool(prohibited_pattern.search(text[clause_start:clause_end]))
+
+        for match in pattern.finditer(text):
+            token = match.group(0).replace("\\", "/")
+            if "/" in token or re.search(r"\broot\b", text, re.IGNORECASE):
+                continue
+            if is_prohibited_reference(match):
                 continue
             result.add(token.casefold())
+
+        for readme_match in re.finditer(r"\bREADME(?:\.md)?\b", text, re.IGNORECASE):
+            if not is_prohibited_reference(readme_match):
+                result.add("readme.md")
+                break
         return result
 
     @staticmethod
@@ -724,26 +848,15 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         return {
             match.group(1).rstrip("/").replace("\\", "/")
             for match in re.finditer(
-                r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)/",
+                # A bare numeric token followed by "/" is commonly a
+                # work-package/phase fraction (for example, "1/12"), not a
+                # repository directory. Require at least one alphabetic or
+                # underscore character in the directory name.
+                r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]*[A-Za-z_][A-Za-z0-9_.-]*)/",
                 text,
             )
             if match.group(1).lower() not in {"root", "."}
         }
-
-    @classmethod
-    def _has_directory_obligation(cls, requirement):
-        """Whether a requirement explicitly commits to workspace directory layout."""
-        return (
-            requirement.kind != RequirementKind.CONSTRAINT
-            and bool(cls._explicit_requirement_directories(requirement))
-        )
-
-    @classmethod
-    def _is_directory_only_requirement(cls, requirement):
-        """Return True for directory existence/layout obligations without file work."""
-        return cls._has_directory_obligation(requirement) and not bool(
-            cls._explicit_requirement_paths(requirement)
-        )
 
     @classmethod
     def _required_architecture_directories(cls, requirements):
@@ -757,84 +870,208 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         return result
 
     @classmethod
-    def _required_architecture_paths(cls, requirements):
-        """Return only file paths positively required by task requirements.
+    def _required_test_artifact_paths(cls, requirements):
+        """Infer concrete, conventional test paths for explicit test-artifact work.
 
-        A directory mentioned by a separate layout requirement does not imply
-        a service-specific file. Conditional "as needed" wording is not a
-        mandatory deliverable.
+        Test placement follows the service directories and technologies already
+        named by the requirements. This keeps test files in the owning module
+        (for example, backend/tests for Django and frontend/tests for React/Vite)
+        instead of imposing a repository-wide tests/ convention on every stack.
+        """
+        all_text = " ".join(
+            " ".join((item.description, *item.acceptance_criteria))
+            for item in requirements
+        )
+        known_directories = set()
+        for item in requirements:
+            if item.kind == RequirementKind.CONSTRAINT:
+                continue
+            known_directories.update(cls._explicit_requirement_directories(item))
+            for path in cls._explicit_requirement_paths(item):
+                parts = PurePosixPath(path).parts
+                if len(parts) > 1:
+                    known_directories.add(parts[0])
+        # Generic folders such as tests/ are not owning service directories.
+        # Keeping them would nest a test file under itself (tests/tests/...).
+        known_directories = {
+            directory for directory in known_directories
+            if directory.casefold() not in {"root", "test", "tests", "spec", "specs", "src", "app", "docs", "documentation"}
+        }
+        # Directory names are often specified without a filename ("under
+        # backend/" or "inside frontend/"). Capture those explicit path
+        # prefixes too, while excluding generic test/root/source folders.
+        known_directories.update(
+            match.group(1)
+            for match in re.finditer(
+                r"(?<![A-Za-z0-9_.-])([A-Za-z][A-Za-z0-9_-]*)/",
+                all_text,
+            )
+            if match.group(1).casefold() not in {"root", "test", "tests", "src", "app"}
+        )
+
+        python_stack = bool(re.search(r"\b(?:django|python|pytest)\b", all_text, re.I))
+        typescript_stack = bool(re.search(r"\b(?:typescript|tsx|vite)\b", all_text, re.I))
+        react_stack = bool(re.search(r"\breact\b", all_text, re.I))
+        result = {}
+
+        for requirement in requirements:
+            if requirement.kind == RequirementKind.CONSTRAINT:
+                continue
+            description = requirement.description
+            if not (
+                re.search(r"\b(?:add|create|write|implement)\b", description, re.I)
+                and re.search(r"\btests?\b", description, re.I)
+            ):
+                continue
+
+            criteria = [
+                criterion for criterion in requirement.acceptance_criteria
+                if re.search(r"\btests?\b", criterion, re.I)
+            ]
+            scopes = []
+            for criterion in criteria or [description]:
+                matching_directories = sorted(
+                    directory for directory in known_directories
+                    if re.search(rf"(?<![A-Za-z0-9_-]){re.escape(directory)}(?![A-Za-z0-9_-])", criterion, re.I)
+                )
+                if matching_directories:
+                    scopes.extend((directory, criterion) for directory in matching_directories)
+                else:
+                    scopes.append((None, criterion))
+
+            # If the acceptance criteria describe several services collectively,
+            # use only the directories explicitly named in that criterion.
+            for directory, criterion in scopes:
+                if directory is None:
+                    slug = re.sub(r"[^a-z0-9]+", "_", requirement.requirement_id.casefold()).strip("_")
+                    if python_stack or not (typescript_stack or react_stack):
+                        path = f"tests/test_{slug}.py"
+                    elif typescript_stack:
+                        path = f"tests/{slug}.test.ts"
+                    else:
+                        path = f"tests/{slug}.test.js"
+                elif re.search(r"\b(?:backend|server|api)\b", directory, re.I):
+                    path = f"{directory}/tests/test_smoke.py" if python_stack else f"{directory}/tests/smoke.test.js"
+                elif re.search(r"\b(?:frontend|client|browser|ui|web)\b", directory, re.I):
+                    extension = ".tsx" if typescript_stack or react_stack else ".jsx" if react_stack else ".js"
+                    path = f"{directory}/tests/smoke.test{extension}"
+                else:
+                    path = (
+                        f"{directory}/tests/test_smoke.py"
+                        if python_stack else f"{directory}/tests/smoke.test.js"
+                    )
+                result.setdefault(path, set()).add(requirement.requirement_id)
+
+        return result
+
+    @classmethod
+    def _required_architecture_paths(cls, requirements, architecture_paths=()):
+        """Return mandatory file paths inferred across the complete requirement set.
+
+        A requirement can refer to "each service directory" while another
+        requirement names the actual service directories. Combine those sources
+        so a root .dockerignore requirement also expands to the named services.
         """
         required = {}
-        task_directories = set().union(*(
+        all_text = " ".join(
+            " ".join((item.description, *item.acceptance_criteria))
+            for item in requirements
+        )
+        # Infer service directories only from requirements explicitly about
+        # repository layout. A slash in prose such as "commands/results" or
+        # "input/output" must not invent a directory deliverable.
+        service_directories = set().union(*(
             cls._explicit_requirement_directories(item)
             for item in requirements
             if item.kind != RequirementKind.CONSTRAINT
         )) if requirements else set()
+        service_directories.update(
+            match.group(1)
+            for match in re.finditer(
+                r"\b(?:under|inside|within)\s+([A-Za-z][A-Za-z0-9_-]*)/",
+                all_text,
+                re.IGNORECASE,
+            )
+            if match.group(1).casefold() not in {
+                "root", "test", "tests", "src", "app", "docs", "documentation"
+            }
+        )
+        # Also recognize compact enumerations such as
+        # "root, frontend, and backend .dockerignore files".
+        for match in re.finditer(
+            r"\broot\s*,\s*([^.;]+?)\s+\.dockerignore\b",
+            all_text,
+            re.IGNORECASE,
+        ):
+            service_directories.update(
+                name for name in re.findall(r"[A-Za-z][A-Za-z0-9_-]*", match.group(1))
+                if name.lower() not in {"and", "service", "services", "appropriate"}
+            )
+
         for requirement in requirements:
             if requirement.kind == RequirementKind.CONSTRAINT:
                 continue
+            paths = cls._explicit_requirement_paths(requirement)
             requirement_text = " ".join(
                 (requirement.description, *requirement.acceptance_criteria)
             )
-            paths = cls._explicit_requirement_paths(requirement)
-            conditional = bool(re.search(
-                r"\b(?:as needed|if needed|when needed|where appropriate|if applicable)\b",
-                requirement_text,
-                re.IGNORECASE,
-            ))
-            if ".dockerignore" in requirement_text.casefold() and not conditional:
-                service_directories = set(
-                    cls._explicit_requirement_directories(requirement)
+            asks_for_service_ignores = (
+                ".dockerignore" in requirement_text.lower()
+                and re.search(
+                    r"\bservice(?:[- ]appropriate)?\b|\beach service directory\b",
+                    requirement_text,
+                    re.IGNORECASE,
                 )
-                if re.search(
-                    r"\b(?:each|every|service[- ]appropriate|service)\s+"
-                    r"(?:service\s+)?directories?\b|\beach service directory\b",
-                    requirement_text,
-                    re.IGNORECASE,
-                ):
-                    service_directories.update(task_directories)
-                for match in re.finditer(
-                    r"\broot\s*,\s*([^.;]+?)\s+\.dockerignore\b",
-                    requirement_text,
-                    re.IGNORECASE,
-                ):
-                    service_directories.update(
-                        name for name in re.findall(
-                            r"[A-Za-z][A-Za-z0-9_-]*", match.group(1)
-                        )
-                        if name.casefold() not in {
-                            "and", "service", "services", "appropriate"
-                        }
-                    )
+            )
+            # A list of root + named service directories also makes the
+            # service-specific paths explicit, even without the word "service".
+            names_service_directories = bool(
+                re.search(r"\broot\s*,\s*[^.;]+?\s+\.dockerignore\b",
+                          requirement_text, re.IGNORECASE)
+            )
+            if asks_for_service_ignores or names_service_directories:
                 paths.update(
                     f"{directory}/.dockerignore"
                     for directory in service_directories
-                    if directory.casefold() not in {"root", "."}
-                )
-            for path in paths:
-                required.setdefault(path.replace("\\", "/"), set()).add(
-                    requirement.requirement_id
+                    if directory.lower() not in {"root", "."}
                 )
 
-        # Broad repository-ignore quality requirements may apply to all
-        # ignore files already established by explicit file obligations, but
-        # they must never create additional service-specific paths.
-        known_ignore_paths = sorted(
-            path for path in required
+            for path in paths:
+                required.setdefault(path, set()).add(requirement.requirement_id)
+
+        # Resolve bare filenames against a unique path already established by
+        # another requirement. This preserves path safety: "docker-compose.yml"
+        # is not assumed to be root-level unless the task context proves it.
+        known_paths = list(required)
+
+        # A repository-wide ignore-rules requirement can legitimately be
+        # implemented by the complete set of root and service .dockerignore
+        # artifacts already established by a more specific requirement.
+        # Preserve the broad requirement ID on every matching file unit rather
+        # than leaving it uncovered because the basename is not unique.
+        ignore_paths = sorted(
+            path for path in known_paths
             if PurePosixPath(path).name.casefold() == ".dockerignore"
         )
-        for requirement in requirements:
-            if requirement.kind == RequirementKind.CONSTRAINT:
-                continue
-            text = " ".join(
-                (requirement.description, *requirement.acceptance_criteria)
-            ).casefold()
-            if (
-                ".dockerignore" in text
-                and re.search(r"\b(?:repository|structure|ignore rules|rules)\b", text)
-            ):
-                for path in known_ignore_paths:
-                    required.setdefault(path, set()).add(requirement.requirement_id)
+        if ignore_paths:
+            for requirement in requirements:
+                if requirement.kind == RequirementKind.CONSTRAINT:
+                    continue
+                requirement_text = " ".join(
+                    (requirement.description, *requirement.acceptance_criteria)
+                ).casefold()
+                describes_repository_ignore_rules = (
+                    ".dockerignore" in requirement_text
+                    and re.search(
+                        r"\b(?:repository|structure|ignore rules|rules)\b",
+                        requirement_text,
+                    )
+                )
+                if describes_repository_ignore_rules:
+                    for ignore_path in ignore_paths:
+                        required.setdefault(ignore_path, set()).add(
+                            requirement.requirement_id
+                        )
 
         known_paths = list(required)
         for requirement in requirements:
@@ -850,6 +1087,11 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                         requirement.requirement_id
                     )
 
+        # A requirement may describe a Compose behavior without repeating the
+        # filename, while another requirement in the same task explicitly
+        # establishes docker-compose.yml. In that bounded context, associate
+        # startup dependency/health-condition work with the already-declared
+        # Compose artifact rather than leaving it without an implementation path.
         compose_paths = sorted(
             path for path in required
             if PurePosixPath(path).name.casefold() in {
@@ -860,22 +1102,201 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             for requirement in requirements:
                 if requirement.kind == RequirementKind.CONSTRAINT:
                     continue
-                text = " ".join(
-                    (requirement.description, *requirement.acceptance_criteria)
-                ).casefold()
+                text = " ".join((requirement.description, *requirement.acceptance_criteria)).casefold()
+                describes_postgres_compose_config = (
+                    re.search(r"\b(?:postgres|postgresql)\b", text)
+                    and re.search(
+                        r"\b(?:credential|password|environment variable|environment-driven|"
+                        r"named volume|persistent volume|persistence|health check|readiness|pg_isready)\b",
+                        text,
+                    )
+                )
+                if describes_postgres_compose_config:
+                    for compose_path in compose_paths:
+                        required.setdefault(compose_path, set()).add(
+                            requirement.requirement_id
+                        )
+
                 describes_compose_dependencies = (
                     re.search(r"\b(?:service|services)\b", text)
                     and re.search(r"\b(?:startup|start[- ]up|dependency|dependencies|depends_on)\b", text)
                     and re.search(r"\b(?:health|healthy|health[- ]condition|health[- ]conditions)\b", text)
                 )
-                describes_postgres_compose_config = (
-                    re.search(r"\bpostgres(?:ql)?\b", text)
+                if describes_compose_dependencies:
+                    for compose_path in compose_paths:
+                        required.setdefault(compose_path, set()).add(requirement.requirement_id)
+
+        # Explicit test-artifact requirements need concrete paths just like
+        # other deliverables. Derive conventional paths from the named service
+        # directories and stack, so the model is prompted with exact targets and
+        # a deterministic repair remains available if it omits them.
+        for path, requirement_ids in cls._required_test_artifact_paths(requirements).items():
+            required.setdefault(path, set()).update(requirement_ids)
+
+        # Derive Dockerfile paths for explicitly named service directories
+        # even when the architecture model omitted one of them. The service
+        # directories are grounded in other requirements in this task, and
+        # _parse_architecture assigns each path to its matching module.
+        for requirement in requirements:
+            if requirement.kind == RequirementKind.CONSTRAINT:
+                continue
+            text = " ".join(
+                (requirement.description, *requirement.acceptance_criteria)
+            )
+            if not re.search(r"\bDockerfiles?\b", text, re.IGNORECASE):
+                continue
+            mentioned_directories = {
+                directory for directory in service_directories
+                if re.search(
+                    rf"\b{re.escape(directory)}\b",
+                    text,
+                    re.IGNORECASE,
+                )
+            }
+            if not mentioned_directories:
+                continue
+            for directory in mentioned_directories:
+                required.setdefault(
+                    f"{directory}/Dockerfile", set()
+                ).add(requirement.requirement_id)
+
+
+        # Resolve bare filenames against architecture paths only when there is
+        # exactly one owner. This supports "update README" and "update
+        # project.yaml" without guessing a root path from prose alone.
+        normalized_architecture_paths = {
+            str(path).replace("\\", "/") for path in architecture_paths
+        }
+        if normalized_architecture_paths:
+            # Cross-cutting dependency-management requirements apply to the
+            # dependency manifests already declared by this architecture. Exact
+            # paths remain grounded in architecture; this rule never invents a
+            # manifest path.
+            dependency_manifest_names = {
+                "requirements.txt", "requirements-dev.txt", "pyproject.toml",
+                "pipfile", "pipfile.lock", "poetry.lock", "uv.lock",
+                "package.json", "package-lock.json", "pnpm-lock.yaml",
+                "yarn.lock", "cargo.toml", "cargo.lock", "go.mod", "go.sum",
+                "pom.xml", "build.gradle", "build.gradle.kts", "gemfile",
+                "gemfile.lock", "composer.json", "composer.lock",
+                "packages.lock.json",
+            }
+            for requirement in requirements:
+                if requirement.kind == RequirementKind.CONSTRAINT:
+                    continue
+                text = " ".join(
+                    (requirement.description, *requirement.acceptance_criteria)
+                )
+                dependency_management = (
+                    re.search(
+                        r"\b(?:dependencies|dependency)\b.{0,60}\b"
+                        r"(?:managed|manage|management|manifest|manifests|declared|"
+                        r"specified|pinned|versions?|installed)\b",
+                        text,
+                        re.IGNORECASE,
+                    )
+                    or re.search(
+                        r"\b(?:manage|management|maintain|pin|install|declare|"
+                        r"specify)\b.{0,40}\b(?:dependencies|dependency)\b",
+                        text,
+                        re.IGNORECASE,
+                    )
+                )
+                if not dependency_management:
+                    continue
+                manifests = [
+                    path for path in normalized_architecture_paths
+                    if PurePosixPath(path).name.casefold() in dependency_manifest_names
+                ]
+                for path in manifests:
+                    required.setdefault(path, set()).add(requirement.requirement_id)
+
+            for requirement in requirements:
+                if requirement.kind == RequirementKind.CONSTRAINT:
+                    continue
+                for basename in cls._explicit_requirement_basenames(requirement):
+                    candidates = [
+                        path for path in normalized_architecture_paths
+                        if PurePosixPath(path).name.casefold() == basename
+                    ]
+                    if len(candidates) == 1:
+                        required.setdefault(candidates[0], set()).add(
+                            requirement.requirement_id
+                        )
+
+            # When a requirement explicitly asks for multiple service
+            # Dockerfiles, bind it to the Dockerfile paths already declared by
+            # the architecture. Match named service directories (e.g.
+            # "frontend and backend") so an unrelated postgres Dockerfile is
+            # not accidentally included.
+            dockerfile_paths = sorted(
+                path for path in normalized_architecture_paths
+                if PurePosixPath(path).name.casefold() == "dockerfile"
+            )
+            for requirement in requirements:
+                if requirement.kind == RequirementKind.CONSTRAINT:
+                    continue
+                text = " ".join(
+                    (requirement.description, *requirement.acceptance_criteria)
+                )
+                if not re.search(r"\bdockerfiles?\b", text, re.IGNORECASE):
+                    continue
+                mentioned_directories = {
+                    part
+                    for path in dockerfile_paths
+                    for part in PurePosixPath(path).parts[:-1]
+                    if re.search(rf"\b{re.escape(part)}\b", text, re.IGNORECASE)
+                }
+                candidates = [
+                    path for path in dockerfile_paths
+                    if not mentioned_directories
+                    or mentioned_directories.intersection(
+                        PurePosixPath(path).parts[:-1]
+                    )
+                ]
+                plural = bool(re.search(r"\bDockerfiles\b", text, re.IGNORECASE))
+                if candidates and (plural or len(candidates) == 1):
+                    for candidate in candidates:
+                        required.setdefault(candidate, set()).add(
+                            requirement.requirement_id
+                        )
+
+            # Compose startup/health requirements belong to the Compose
+            # artifact when the architecture declares exactly one such file.
+            # The filename is grounded in architecture rather than guessed.
+            compose_names = {
+                "docker-compose.yml", "docker-compose.yaml",
+                "compose.yml", "compose.yaml",
+            }
+            architecture_compose_paths = sorted(
+                path for path in normalized_architecture_paths
+                if PurePosixPath(path).name.casefold() in compose_names
+            )
+            compose_paths = sorted({
+                path for path in required
+                if PurePosixPath(path).name.casefold() in compose_names
+            })
+            if not compose_paths and len(architecture_compose_paths) == 1:
+                compose_paths = architecture_compose_paths
+
+            for requirement in requirements:
+                if requirement.kind == RequirementKind.CONSTRAINT:
+                    continue
+                text = " ".join(
+                    (requirement.description, *requirement.acceptance_criteria)
+                ).casefold()
+                describes_compose_health_dependencies = (
+                    re.search(r"\bcompose\b", text)
                     and re.search(
-                        r"\b(?:credential|environment|volume|persistent|health|readiness|database)\b",
+                        r"\b(?:startup|start[- ]up|dependency|dependencies|depends_on)\b",
+                        text,
+                    )
+                    and re.search(
+                        r"\b(?:health|healthy|health[- ]condition|health[- ]conditions|readiness)\b",
                         text,
                     )
                 )
-                if describes_compose_dependencies or describes_postgres_compose_config:
+                if describes_compose_health_dependencies:
                     for compose_path in compose_paths:
                         required.setdefault(compose_path, set()).add(
                             requirement.requirement_id
@@ -887,6 +1308,18 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         """Find an unambiguous architecture module for an explicit required path."""
         if "/" in path:
             prefix = path.split("/", 1)[0].casefold()
+            if prefix in {"test", "tests"}:
+                root_named = [
+                    index for index, module in enumerate(modules)
+                    if module.name.strip().casefold() in {"root", "repository", "workspace"}
+                ]
+                if len(root_named) == 1:
+                    return root_named[0]
+                root_file_owners = [
+                    index for index, module in enumerate(modules)
+                    if any("/" not in item.replace("\\", "/") for item in module.file_paths)
+                ]
+                return root_file_owners[0] if len(root_file_owners) == 1 else None
             named = [
                 index for index, module in enumerate(modules)
                 if module.name.strip().casefold() == prefix
@@ -918,6 +1351,23 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         ]
         return root_file_owners[0] if len(root_file_owners) == 1 else None
 
+    def _parse_and_validate_architecture(
+        self, data, requirements, *, objective="", constraints=(), acceptance_criteria=()
+    ):
+        modules = self._parse_architecture(data, requirements)
+        report = ArchitectureDesignValidator().validate(
+            modules,
+            objective=objective,
+            requirements=requirements,
+            constraints=constraints,
+            acceptance_criteria=acceptance_criteria,
+        )
+        if not report.valid:
+            raise ValueError(
+                "architecture design quality validation failed: " + "; ".join(report.issues)
+            )
+        return modules
+
     def _parse_architecture(self, data, requirements=None):
         result = [ArchitectureModule(
             module_id=x["module_id"], name=x["name"], responsibility=x["responsibility"],
@@ -931,27 +1381,35 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         EngineeringSpecification._assert_acyclic({x.module_id: x.depends_on for x in result}, "module")
 
         if requirements is not None:
+            requirement_text = " ".join(
+                " ".join((item.description, *item.acceptance_criteria))
+                for item in requirements
+            )
             required_paths = self._required_architecture_paths(requirements)
             repairs = []
-            # A service-specific .dockerignore is a mandatory file only when
-            # the requirement mapping positively establishes that exact path.
-            # Directory names alone are not evidence of a Docker build context.
+            # A service-specific .dockerignore is meaningful only for a
+            # service/directory named by the task. Prevent architecture
+            # expansion from inventing unrelated build contexts (for example
+            # commands/.dockerignore when no commands service was requested).
             grounded_modules = []
             for module in result:
                 retained_paths = []
                 for raw_path in module.file_paths:
                     path = raw_path.replace("\\", "/")
-                    if PurePosixPath(path).name.casefold() == ".dockerignore" and path not in required_paths:
-                        repairs.append({
-                            "action": "drop_unrequired_dockerignore",
-                            "path": path,
-                            "module_id": module.module_id,
-                            "reason": (
-                                "directory mention or conditional 'as needed' wording "
-                                "does not make this service-specific ignore file mandatory"
-                            ),
-                        })
-                        continue
+                    if path.endswith("/.dockerignore"):
+                        directory = path.split("/", 1)[0]
+                        if not re.search(
+                            rf"(?<![A-Za-z0-9_-]){re.escape(directory)}\s*/",
+                            requirement_text,
+                            re.IGNORECASE,
+                        ):
+                            repairs.append({
+                                "action": "drop_ungrounded_service_dockerignore",
+                                "path": path,
+                                "module_id": module.module_id,
+                                "reason": "the task does not name this service directory",
+                            })
+                            continue
                     retained_paths.append(raw_path)
                 grounded_modules.append(replace(module, file_paths=tuple(retained_paths)))
             result = grounded_modules
@@ -1002,16 +1460,25 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 test_paths = [
                     path.replace("\\", "/")
                     for module in result for path in module.file_paths
-                    if (
-                        any(part.casefold() in {"test", "tests"} for part in PurePosixPath(path).parts[:-1])
-                        and re.search(r"(?:^test_|_test\.)", PurePosixPath(path).name, re.I)
+                    if re.search(
+                        r"(?:^test_|_test\.|\.test\.|\.spec\.)",
+                        PurePosixPath(path).name,
+                        re.I,
                     )
                 ]
-                if not test_paths:
+                missing_test_requirements = [
+                    item.requirement_id for item in explicit_test_requirements
+                    if not any(
+                        item.requirement_id in requirement_ids
+                        and path in test_paths
+                        for path, requirement_ids in required_paths.items()
+                    )
+                ]
+                if missing_test_requirements:
                     raise ValueError(
-                        "architecture must declare at least one concrete test file path under tests/ "
+                        "architecture must declare concrete files using a recognized test-file naming convention "
                         "for explicit test-artifact requirement(s): "
-                        + ", ".join(item.requirement_id for item in explicit_test_requirements)
+                        + ", ".join(missing_test_requirements)
                     )
         return result
 
@@ -1073,6 +1540,22 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         }
 
     @staticmethod
+    def _format_manual_command_suggestions(command_parts: tuple[str, ...]) -> tuple[str, ...]:
+        """Preserve command-like content as reviewer guidance without executing it.
+
+        The model schema defines ``command`` as argv, but models sometimes put
+        complete shell commands in individual array entries. If an entry
+        contains whitespace, treat entries as separate suggested commands;
+        otherwise treat the array as one argv vector.
+        """
+        parts = tuple(str(part).strip() for part in command_parts if str(part).strip())
+        if not parts:
+            return ()
+        if any(any(ch.isspace() for ch in part) for part in parts):
+            return parts
+        return (" ".join(parts),)
+
+    @staticmethod
     def _next_unit_id(units):
         """Return a deterministic, unused implementation-unit ID."""
         existing = {unit.unit_id for unit in units}
@@ -1093,15 +1576,180 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
 
     @staticmethod
     def _unit_kind_for_required_path(path):
-        """Choose a conservative artifact kind from an explicitly required path."""
-        name = PurePosixPath(path).name.lower()
-        if name in {"readme.md", "changelog.md", "contributing.md"}:
+        """Infer the artifact kind from strong, conventional path semantics."""
+        normalized = str(path).replace("\\", "/")
+        parts = tuple(part.casefold() for part in PurePosixPath(normalized).parts)
+        name = parts[-1] if parts else ""
+
+        if (
+            name in {"readme.md", "changelog.md", "contributing.md"}
+            or any(part in {"docs", "documentation"} for part in parts[:-1])
+        ):
             return UnitKind.DOCUMENTATION
+        if (
+            any(part in {"test", "tests", "spec", "specs"} for part in parts[:-1])
+            or name.startswith("test_")
+            or ".test." in name
+            or ".spec." in name
+            or name.endswith("_test.py")
+        ):
+            return UnitKind.TEST
+        if (
+            name in {
+                "settings.py", "config.py", "configuration.py",
+                "dockerfile", "docker-compose.yml", "docker-compose.yaml",
+                "pyproject.toml", "package.json", "tsconfig.json",
+                "vite.config.ts", "requirements.txt",
+            }
+            or name.startswith(".env")
+            or name.endswith((".yaml", ".yml", ".toml", ".ini", ".cfg"))
+            or any(part in {"config", "configs", "configuration", "settings"} for part in parts[:-1])
+        ):
+            return UnitKind.CONFIGURATION
+        if name.endswith((".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico", ".gif")):
+            return UnitKind.ASSET
         if name.endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".sql")):
             return UnitKind.SOURCE
-        if name.endswith((".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico")):
-            return UnitKind.ASSET
         return UnitKind.CONFIGURATION
+
+    @classmethod
+    def _has_unambiguous_path_artifact_kind(cls, path):
+        """Return whether the path itself strongly identifies its artifact kind.
+
+        Generic source extensions (for example, ``app.py``) are not enough to
+        override a model disagreement. Conventional settings/configuration,
+        test, documentation, and asset paths are sufficiently specific.
+        """
+        normalized = str(path).replace("\\", "/")
+        parts = tuple(part.casefold() for part in PurePosixPath(normalized).parts)
+        name = parts[-1] if parts else ""
+        return bool(
+            name in {
+                "readme.md", "changelog.md", "contributing.md",
+                "settings.py", "config.py", "configuration.py",
+                "dockerfile", "docker-compose.yml", "docker-compose.yaml",
+                "pyproject.toml", "package.json", "tsconfig.json",
+                "vite.config.ts", "requirements.txt",
+            }
+            or name.startswith(".env")
+            or name.endswith((".yaml", ".yml", ".toml", ".ini", ".cfg"))
+            or name.endswith((".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico", ".gif"))
+            or any(part in {
+                "docs", "documentation", "test", "tests", "spec", "specs",
+                "config", "configs", "configuration", "settings",
+            } for part in parts[:-1])
+            or name.startswith("test_")
+            or ".test." in name
+            or ".spec." in name
+            or name.endswith("_test.py")
+        )
+
+    @classmethod
+    def _complete_cross_cutting_requirement_coverage(
+        cls, units, requirements, architecture_paths
+    ):
+        """Map cross-cutting security/style obligations to grounded project artifacts.
+
+        Security requirements are anchored to environment examples and runtime
+        settings declared by the architecture. Coding-standard requirements apply
+        to generated source and test units. Unrelated uncovered requirements remain
+        subject to the normal strict coverage validator.
+        """
+        result = list(units)
+        repairs = []
+        normalized_paths = {
+            str(path).replace("\\", "/") for path in architecture_paths
+        }
+        for requirement in requirements:
+            if requirement.kind == RequirementKind.CONSTRAINT:
+                continue
+            text = " ".join(
+                (requirement.description, *requirement.acceptance_criteria)
+            ).casefold()
+
+            is_environment_security = (
+                re.search(r"\b(?:security|secure|secrets?|non-secret)\b", text)
+                and re.search(r"\b(?:environment|variables?|placeholder|secret)\b", text)
+            )
+            if is_environment_security:
+                candidates = sorted(
+                    path for path in normalized_paths
+                    if PurePosixPath(path).name.casefold() in {
+                        ".env.example", ".env.sample", ".env.template",
+                        "settings.py",
+                    }
+                )
+                for path in candidates:
+                    matching = [
+                        index for index, unit in enumerate(result)
+                        if unit.target_path.replace("\\", "/") == path
+                    ]
+                    if not matching and PurePosixPath(path).name.casefold().startswith(".env"):
+                        unit_id = cls._next_unit_id(result)
+                        result.append(ImplementationUnit(
+                            unit_id=unit_id,
+                            title="Document safe environment-variable placeholders",
+                            target_path=path,
+                            kind=UnitKind.CONFIGURATION,
+                            satisfies=(requirement.requirement_id,),
+                            acceptance_criteria=requirement.acceptance_criteria,
+                        ))
+                        repairs.append({
+                            "action": "create_cross_cutting_security_unit",
+                            "requirement_id": requirement.requirement_id,
+                            "unit_id": unit_id,
+                            "target_path": path,
+                        })
+                        continue
+                    for index in matching:
+                        unit = result[index]
+                        satisfies = tuple(dict.fromkeys(
+                            (*unit.satisfies, requirement.requirement_id)
+                        ))
+                        acceptance = tuple(dict.fromkeys(
+                            (*unit.acceptance_criteria, *requirement.acceptance_criteria)
+                        ))
+                        if satisfies != unit.satisfies or acceptance != unit.acceptance_criteria:
+                            result[index] = replace(
+                                unit, satisfies=satisfies,
+                                acceptance_criteria=acceptance,
+                            )
+                            repairs.append({
+                                "action": "map_cross_cutting_security_requirement",
+                                "requirement_id": requirement.requirement_id,
+                                "unit_id": unit.unit_id,
+                                "target_path": path,
+                            })
+
+            is_coding_standards = bool(re.search(
+                r"\b(?:coding\s+standards?|style\s+guidelines?|code\s+quality|maintainab(?:le|ility))\b",
+                text,
+            ))
+            if is_coding_standards:
+                candidates = [
+                    index for index, unit in enumerate(result)
+                    if unit.kind in {UnitKind.SOURCE, UnitKind.TEST}
+                ]
+                for index in candidates:
+                    unit = result[index]
+                    satisfies = tuple(dict.fromkeys(
+                        (*unit.satisfies, requirement.requirement_id)
+                    ))
+                    acceptance = tuple(dict.fromkeys(
+                        (*unit.acceptance_criteria, *requirement.acceptance_criteria)
+                    ))
+                    if satisfies != unit.satisfies or acceptance != unit.acceptance_criteria:
+                        result[index] = replace(
+                            unit, satisfies=satisfies,
+                            acceptance_criteria=acceptance,
+                        )
+                        repairs.append({
+                            "action": "map_cross_cutting_coding_standards_requirement",
+                            "requirement_id": requirement.requirement_id,
+                            "unit_id": unit.unit_id,
+                            "target_path": unit.target_path,
+                        })
+        return result, repairs
 
     @classmethod
     def _normalize_requirement_file_mappings(
@@ -1115,7 +1763,9 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         or deterministically inferred from another requirement in this task, the
         required artifact is authoritative.
         """
-        required_paths = cls._required_architecture_paths(requirements)
+        required_paths = cls._required_architecture_paths(
+            requirements, architecture_paths
+        )
         paths_by_requirement = {}
         for path, requirement_ids in required_paths.items():
             for requirement_id in requirement_ids:
@@ -1125,31 +1775,6 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
 
         result = list(units)
         repairs = []
-        directory_only_ids = {
-            item.requirement_id for item in requirements
-            if cls._is_directory_only_requirement(item)
-        }
-        for index, unit in enumerate(result):
-            misplaced = directory_only_ids.intersection(unit.satisfies)
-            if misplaced:
-                result[index] = replace(
-                    unit,
-                    satisfies=tuple(
-                        requirement_id for requirement_id in unit.satisfies
-                        if requirement_id not in directory_only_ids
-                    ),
-                )
-                for requirement_id in sorted(misplaced):
-                    repairs.append({
-                        "action": "remove_directory_requirement_from_file_unit",
-                        "requirement_id": requirement_id,
-                        "unit_id": unit.unit_id,
-                        "target_path": unit.target_path,
-                        "reason": (
-                            "a file beneath a directory is not evidence that the "
-                            "directory-existence requirement is implemented"
-                        ),
-                    })
         contract_by_id = {item.contract_id: item for item in contracts}
         requirement_by_id = {
             item.requirement_id: item for item in requirements
@@ -1289,20 +1914,21 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         """Repair requirement coverage using explicit file and directory evidence.
 
         Existing units for a shared file are augmented rather than duplicated.
-        File requirements are mapped to concrete architecture paths. Directory
-        existence remains a separate structural obligation and is implemented
-        with explicit mkdir operations during planning.
+        Directory requirements are mapped only when architecture files and
+        implementation units exist beneath every explicitly named directory.
         """
         result = list(units)
         repairs = []
         requirement_by_id = {item.requirement_id: item for item in requirements}
-        required_paths = cls._required_architecture_paths(requirements)
+        required_paths = cls._required_architecture_paths(
+            requirements, architecture_paths
+        )
         normalized_architecture_paths = {
-            path.replace("\\\\", "/") for path in architecture_paths
+            path.replace("\\", "/") for path in architecture_paths
         }
 
         for path, requirement_ids in sorted(required_paths.items()):
-            normalized_path = path.replace("\\\\", "/")
+            normalized_path = path.replace("\\", "/")
             if normalized_path not in normalized_architecture_paths:
                 continue
             owners = [
@@ -1312,7 +1938,7 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             for requirement_id in owners:
                 exact_units = [
                     index for index, unit in enumerate(result)
-                    if unit.target_path.replace("\\\\", "/") == normalized_path
+                    if unit.target_path.replace("\\", "/") == normalized_path
                 ]
                 if exact_units:
                     index = exact_units[0]
@@ -1321,12 +1947,14 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                     if already_covered:
                         continue
 
-                    if len(owners) == 1:
-                        new_satisfies = (requirement_id,)
-                    else:
-                        new_satisfies = tuple(dict.fromkeys(
-                            (*previous.satisfies, requirement_id)
-                        ))
+                    # An explicit path owner is an additional traceability
+                    # edge, not proof that existing requirement mappings are
+                    # invalid. File-specific misplaced mappings are handled by
+                    # _normalize_requirement_file_mappings after this additive
+                    # completion step.
+                    new_satisfies = tuple(dict.fromkeys(
+                        (*previous.satisfies, requirement_id)
+                    ))
                     requirement = requirement_by_id[requirement_id]
                     new_acceptance = tuple(dict.fromkeys(
                         (*previous.acceptance_criteria, *requirement.acceptance_criteria)
@@ -1338,8 +1966,8 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                     )
                     repairs.append({
                         "action": (
-                            "remap_unit_requirement" if len(owners) == 1
-                            else "augment_shared_file_unit"
+                            "augment_shared_file_unit" if len(owners) > 1
+                            else "augment_required_file_unit"
                         ),
                         "unit_id": previous.unit_id,
                         "target_path": normalized_path,
@@ -1360,7 +1988,7 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 basename = PurePosixPath(normalized_path).name.casefold()
                 templates = [
                     unit for unit in result
-                    if PurePosixPath(unit.target_path.replace("\\\\", "/")).name.casefold() == basename
+                    if PurePosixPath(unit.target_path.replace("\\", "/")).name.casefold() == basename
                     and requirement_id in unit.satisfies
                 ]
                 template = templates[0] if templates else None
@@ -1396,8 +2024,64 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                     "reason": "the requirement explicitly requires this architecture file but no dedicated unit covered it",
                 })
 
-        # Directory-only obligations are handled as structural requirements,
-        # not by attaching their IDs to incidental child file units.
+        # A directory-layout requirement can be satisfied by the concrete file
+        # units that create artifacts beneath each named directory. Require
+        # coverage beneath every directory, not merely one matching child.
+        for requirement in requirements:
+            if requirement.kind == RequirementKind.CONSTRAINT:
+                continue
+            directories = sorted(cls._explicit_requirement_directories(requirement))
+            if not directories:
+                continue
+            directory_units = {}
+            complete = True
+            for directory in directories:
+                prefix = directory.rstrip("/") + "/"
+                architecture_children = {
+                    path for path in normalized_architecture_paths
+                    if path.startswith(prefix)
+                }
+                matching_indices = [
+                    index for index, unit in enumerate(result)
+                    if unit.target_path.replace("\\", "/") in architecture_children
+                ]
+                if not architecture_children or not matching_indices:
+                    complete = False
+                    break
+                directory_units[directory] = matching_indices
+            if not complete:
+                continue
+
+            for directory, indices in directory_units.items():
+                for index in indices:
+                    previous = result[index]
+                    new_satisfies = tuple(dict.fromkeys(
+                        (*previous.satisfies, requirement.requirement_id)
+                    ))
+                    directory_check = f"Directory {directory}/ exists in the workspace."
+                    new_acceptance = tuple(dict.fromkeys(
+                        (*previous.acceptance_criteria, directory_check)
+                    ))
+                    if (
+                        new_satisfies != previous.satisfies
+                        or new_acceptance != previous.acceptance_criteria
+                    ):
+                        result[index] = replace(
+                            previous,
+                            satisfies=new_satisfies,
+                            acceptance_criteria=new_acceptance,
+                        )
+                        repairs.append({
+                            "action": "map_directory_requirement_to_child_unit",
+                            "requirement_id": requirement.requirement_id,
+                            "directory": directory,
+                            "unit_id": previous.unit_id,
+                            "target_path": previous.target_path,
+                            "reason": (
+                                "the unit creates a required artifact beneath this directory; "
+                                "all explicitly named directories have corresponding child units"
+                            ),
+                        })
         return result, repairs
 
     @staticmethod
@@ -1436,103 +2120,9 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         requirement_tokens = cls._coverage_tokens(requirement_text)
         return bool(criterion_tokens & requirement_tokens)
 
-    @staticmethod
-    def _acceptance_criterion_targets_unit(description, unit):
-        """Recognize an explicit file-and-directory target in criterion text."""
-        text = " ".join(str(description).casefold().replace("\\", "/").split())
-        target = unit.target_path.replace("\\", "/").casefold()
-        basename = PurePosixPath(target).name
-        if basename not in text:
-            return False
-        parent = PurePosixPath(target).parent.as_posix()
-        if parent in {"", "."}:
-            return bool(re.search(r"\b(?:root|repository root|workspace root)\b", text))
-        return parent in text or parent.rstrip("/") + "/" in text
-
-    @classmethod
-    def _normalize_acceptance_criterion_implementation_mapping(cls, units, requirements):
-        """Bind each acceptance criterion to explicit implementation units.
-
-        A single-unit requirement has an unambiguous legacy mapping. When a
-        requirement spans multiple units, the model must explicitly identify
-        which unit(s) implement each criterion; the generator does not infer
-        that mapping from a shared parent requirement or copied description.
-        """
-        result = list(units)
-        repairs = []
-        for requirement in requirements:
-            if (
-                not requirement.acceptance_criterion_ids
-                or requirement.kind == RequirementKind.CONSTRAINT
-                or cls._is_directory_only_requirement(requirement)
-            ):
-                continue
-            indices = [
-                index for index, unit in enumerate(result)
-                if requirement.requirement_id in unit.satisfies
-            ]
-            if not indices:
-                continue
-            for criterion_id, description in zip(
-                requirement.acceptance_criterion_ids,
-                requirement.acceptance_criteria,
-            ):
-                already_mapped = [
-                    index for index in indices
-                    if criterion_id in result[index].implements_acceptance_criteria
-                ]
-                if already_mapped:
-                    continue
-                target_matches = [
-                    index for index in indices
-                    if cls._acceptance_criterion_targets_unit(description, result[index])
-                ]
-                required_paths = {
-                    path for path, requirement_ids in
-                    cls._required_architecture_paths(requirements).items()
-                    if requirement.requirement_id in requirement_ids
-                }
-                all_units_are_required_files = bool(required_paths) and all(
-                    result[index].target_path.replace("\\", "/") in required_paths
-                    for index in indices
-                )
-                candidates = target_matches or (
-                    indices
-                    if len(indices) == 1 or all_units_are_required_files
-                    else []
-                )
-                if not candidates:
-                    raise ValueError(
-                        f"acceptance criterion {criterion_id!r} for {requirement.requirement_id} "
-                        "must be explicitly mapped to implementation unit(s); "
-                        f"multiple candidate units exist: {[result[index].unit_id for index in indices]}"
-                    )
-                for index in candidates:
-                    unit = result[index]
-                    result[index] = replace(
-                        unit,
-                        implements_acceptance_criteria=tuple(dict.fromkeys((
-                            *unit.implements_acceptance_criteria, criterion_id
-                        ))),
-                    )
-                    repairs.append({
-                        "action": "map_acceptance_criterion_to_implementation_unit",
-                        "criterion_id": criterion_id,
-                        "unit_id": unit.unit_id,
-                        "requirement_id": requirement.requirement_id,
-                        "reason": (
-                            "acceptance criterion names the implementation path"
-                            if target_matches
-                            else "the criterion spans all explicitly required file units"
-                            if all_units_are_required_files
-                            else "the requirement has exactly one implementation unit"
-                        ),
-                    })
-        return result, repairs
-
     @classmethod
     def _complete_verification_coverage(cls, verification, units, requirements):
-        """Keep grounded coverage and add deterministic checks for uncovered obligations."""
+        """Keep semantically grounded model coverage and add explicit manual checks for gaps."""
         requirement_by_id = {item.requirement_id: item for item in requirements}
         requirement_ids = set(requirement_by_id)
         unit_ids = {unit.unit_id for unit in units}
@@ -1544,19 +2134,9 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             removed_refs = []
             for reference in criterion.covers:
                 if reference in requirement_ids:
-                    referenced_requirement = requirement_by_id[reference]
-                    if cls._is_directory_only_requirement(referenced_requirement):
-                        supported = (
-                            criterion.kind == VerificationKind.STRUCTURAL
-                            and cls._criterion_supports_requirement(
-                                criterion, referenced_requirement
-                            )
-                        )
-                    else:
-                        supported = cls._criterion_supports_requirement(
-                            criterion, referenced_requirement
-                        )
-                    if supported:
+                    if cls._criterion_supports_requirement(
+                        criterion, requirement_by_id[reference]
+                    ):
                         kept_refs.append(reference)
                     else:
                         removed_refs.append(reference)
@@ -1573,15 +2153,7 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                     "removed_requirement_ids": removed_refs,
                     "reason": "criterion description has no meaningful term overlap with the referenced requirement",
                 })
-            # Keep unknown acceptance-criterion references visible so the
-            # authoritative cross-reference validator rejects them.
-            result.append(replace(
-                criterion,
-                covers=tuple(dict.fromkeys(kept_refs)),
-                covers_acceptance_criteria=tuple(dict.fromkeys(
-                    criterion.covers_acceptance_criteria
-                )),
-            ))
+            result.append(replace(criterion, covers=tuple(dict.fromkeys(kept_refs))))
 
         covered = {
             reference for criterion in result for reference in criterion.covers
@@ -1600,125 +2172,72 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         next_number = 1
         existing_ids = {criterion.criterion_id for criterion in result}
         for requirement in requirements:
-            if requirement.requirement_id in covered and not (
-                cls._is_directory_only_requirement(requirement)
-                and not any(
-                    requirement.requirement_id in criterion.covers
-                    and criterion.kind == VerificationKind.STRUCTURAL
-                    for criterion in result
-                )
-            ):
+            if requirement.requirement_id in covered:
                 continue
             while f"VER-AUTO-{next_number:03d}" in existing_ids:
                 next_number += 1
             criterion_id = f"VER-AUTO-{next_number:03d}"
             next_number += 1
             existing_ids.add(criterion_id)
+
+            # Prefer an executed check over a human checklist: when a Python test
+            # unit explicitly satisfies this requirement, run that test file.
+            # Only the requirement's own test units are used, so the check does
+            # not claim coverage the plan never assigned.
+            test_paths = tuple(sorted({
+                unit.target_path for unit in units
+                if unit.kind == UnitKind.TEST
+                and requirement.requirement_id in unit.satisfies
+                and PurePosixPath(unit.target_path).suffix.lower() == ".py"
+            }))
+            if test_paths:
+                result.append(VerificationCriterion(
+                    criterion_id=criterion_id,
+                    description=(
+                        f"Run the automated tests that cover {requirement.requirement_id}: "
+                        f"{requirement.description}"
+                    ),
+                    kind=VerificationKind.BEHAVIORAL,
+                    required=True,
+                    command=("python", "-m", "pytest", "-q", "-p", "no:cacheprovider", *test_paths),
+                    covers=(requirement.requirement_id,),
+                ))
+                repairs.append({
+                    "action": "create_test_backed_verification",
+                    "criterion_id": criterion_id,
+                    "covers": [requirement.requirement_id],
+                    "test_paths": list(test_paths),
+                    "reason": "requirement is satisfied by a Python test unit; verified by executing that test file instead of a manual checklist",
+                })
+                continue
+
             checks = tuple(requirement.acceptance_criteria) or (
                 requirement.description,
             )
-            if cls._is_directory_only_requirement(requirement):
-                directories = sorted(cls._explicit_requirement_directories(requirement))
-                command_code = (
-                    "from pathlib import Path; import sys; "
-                    f"paths={directories!r}; "
-                    "missing=[p for p in paths if not Path(p).is_dir()]; "
-                    "print('Missing directories:', ', '.join(missing) if missing else 'none'); "
-                    "sys.exit(1 if missing else 0)"
-                )
-                description = (
-                    f"Verify that all required directories exist: "
-                    + ", ".join(f"{directory}/" for directory in directories)
-                )
-                kind = VerificationKind.STRUCTURAL
-                command = ("python", "-c", command_code)
-                reason = "created a deterministic structural check for directory existence"
-            else:
-                description = (
-                    f"Manually verify {requirement.requirement_id}: {requirement.description}\n"
-                    "Acceptance checks:\n"
-                    + "\n".join(f"- {check}" for check in checks)
-                )
-                kind = VerificationKind.MANUAL
-                command = ()
-                reason = "requirement lacked a semantically grounded verification criterion; created a manual checklist from its acceptance criteria"
+            # Constraints (for example, "use Windows-compatible commands") usually
+            # cannot be executed by ALISA. Their manual review is reported but does
+            # not block acceptance; functional manual checks still do.
+            is_constraint = requirement.kind == RequirementKind.CONSTRAINT
+            description = (
+                f"{'Manual review (non-blocking constraint)' if is_constraint else 'Manually verify'} "
+                f"{requirement.requirement_id}: {requirement.description}\n"
+                "Acceptance checks:\n"
+                + "\n".join(f"- {check}" for check in checks)
+            )
             result.append(VerificationCriterion(
                 criterion_id=criterion_id,
                 description=description,
-                kind=kind,
-                required=True,
-                command=command,
+                kind=VerificationKind.MANUAL,
+                required=not is_constraint,
+                command=(),
                 covers=(requirement.requirement_id,),
             ))
-            result[-1] = replace(
-                result[-1],
-                covers_acceptance_criteria=(
-                    requirement.acceptance_criterion_ids
-                    if not cls._is_directory_only_requirement(requirement)
-                    else ()
-                ),
-            )
             repairs.append({
                 "action": "create_requirement_verification",
                 "criterion_id": criterion_id,
                 "covers": [requirement.requirement_id],
-                "reason": reason,
+                "reason": "requirement lacked a semantically grounded verification criterion; created a manual checklist from its acceptance criteria",
             })
-
-        for requirement in requirements:
-            if not cls._is_directory_only_requirement(requirement):
-                continue
-            structural_indices = [
-                index for index, criterion in enumerate(result)
-                if criterion.required
-                and criterion.kind == VerificationKind.STRUCTURAL
-                and requirement.requirement_id in criterion.covers
-            ]
-            if structural_indices:
-                index = structural_indices[0]
-                criterion = result[index]
-                result[index] = replace(
-                    criterion,
-                    covers_acceptance_criteria=tuple(dict.fromkeys((
-                        *criterion.covers_acceptance_criteria,
-                        *requirement.acceptance_criterion_ids,
-                    ))),
-                )
-
-        verified_acceptance_ids = {
-            reference for criterion in result
-            if criterion.required
-            for reference in criterion.covers_acceptance_criteria
-        }
-        for requirement in requirements:
-            for criterion_id, description in zip(
-                requirement.acceptance_criterion_ids,
-                requirement.acceptance_criteria,
-            ):
-                if criterion_id in verified_acceptance_ids:
-                    continue
-                while f"VER-AC-{next_number:03d}" in existing_ids:
-                    next_number += 1
-                verification_id = f"VER-AC-{next_number:03d}"
-                next_number += 1
-                existing_ids.add(verification_id)
-                result.append(VerificationCriterion(
-                    criterion_id=verification_id,
-                    description=(
-                        f"Manually verify acceptance criterion {criterion_id}: {description}"
-                    ),
-                    kind=VerificationKind.MANUAL,
-                    required=True,
-                    command=(),
-                    covers=(requirement.requirement_id,),
-                    covers_acceptance_criteria=(criterion_id,),
-                ))
-                repairs.append({
-                    "action": "create_acceptance_criterion_verification",
-                    "criterion_id": verification_id,
-                    "covers_acceptance_criteria": [criterion_id],
-                    "reason": "acceptance criterion lacked explicit verification coverage",
-                })
         return result, repairs
 
     @classmethod
@@ -1750,8 +2269,13 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
 
     @staticmethod
     def _is_verification_only_unit(unit):
-        """Recognize units whose title describes checking, not changing, an artifact."""
-        if unit.kind == UnitKind.TEST:
+        """Recognize check-only units without discarding file-backed documentation.
+
+        Documentation units are concrete deliverables even when their titles
+        begin with "Report" (for example, a README section documenting changed
+        files, verification results, and known limitations).
+        """
+        if unit.kind in {UnitKind.TEST, UnitKind.DOCUMENTATION}:
             return False
         return bool(re.match(
             r"^\s*(?:verify|validate|check|review|report)\b",
@@ -1837,7 +2361,6 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 requirement_id for requirement_id in sorted(required_ids)
                 if requirement_id in requirement_by_id
                 and requirement_by_id[requirement_id].kind != RequirementKind.CONSTRAINT
-                and not cls._is_directory_only_requirement(requirement_by_id[requirement_id])
                 and not any(
                     requirement_id in candidate.satisfies
                     for candidate in retained
@@ -1906,7 +2429,6 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 requirement_id for requirement_id in sorted(required_ids)
                 if requirement_id in requirement_by_id
                 and requirement_by_id[requirement_id].kind != RequirementKind.CONSTRAINT
-                and not cls._is_directory_only_requirement(requirement_by_id[requirement_id])
                 and not any(
                     requirement_id in candidate.satisfies
                     for candidate in retained
@@ -2024,11 +2546,30 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         for group in groups.values():
             first = group[0]
             kinds = {unit.kind for unit in group}
+            merged_kind = first.kind
             if len(kinds) != 1:
-                raise ValueError(
-                    f"units targeting the same file {first.target_path!r} disagree "
-                    f"on artifact kind: {sorted(item.value for item in kinds)}"
-                )
+                inferred_kind = cls._unit_kind_for_required_path(first.target_path)
+                if (
+                    cls._has_unambiguous_path_artifact_kind(first.target_path)
+                    and inferred_kind in kinds
+                ):
+                    merged_kind = inferred_kind
+                    repairs.append({
+                        "action": "normalize_artifact_kind_from_path",
+                        "target_path": first.target_path,
+                        "previous_kinds": sorted(item.value for item in kinds),
+                        "artifact_kind": inferred_kind.value,
+                        "unit_ids": [unit.unit_id for unit in group],
+                        "reason": (
+                            "the target path has an unambiguous conventional artifact "
+                            "kind; conflicting unit labels were normalized before merging"
+                        ),
+                    })
+                else:
+                    raise ValueError(
+                        f"units targeting the same file {first.target_path!r} disagree "
+                        f"on artifact kind: {sorted(item.value for item in kinds)}"
+                    )
             group_ids = {unit.unit_id for unit in group}
             dependencies = []
             for unit in group:
@@ -2040,6 +2581,7 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                         dependencies.append(mapped)
             merged = replace(
                 first,
+                kind=merged_kind,
                 title=(
                     first.title if len(group) == 1
                     else f"Implement {first.target_path} (combined {len(group)} activities)"
@@ -2113,7 +2655,6 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             raise ValueError("every implementation_units item must be an object")
         if not raw_units and any(
             requirement.kind != RequirementKind.CONSTRAINT
-            and not self._is_directory_only_requirement(requirement)
             for requirement in (requirements or ())
         ):
             raise ValueError(
@@ -2148,9 +2689,10 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 satisfies=tuple(item.get("satisfies", ())),
                 implements=tuple(item.get("implements", ())),
                 acceptance_criteria=tuple(item.get("acceptance_criteria", ())),
-                implements_acceptance_criteria=tuple(item.get("implements_acceptance_criteria", ())),
             ))
+        original_units = tuple(units)
         verification = []
+        manual_command_repairs = []
         for index, item in enumerate(self._items(data, "verification"), start=1):
             criterion_id = (
                 item.get("criterion_id")
@@ -2171,31 +2713,41 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             verification_command = tuple(item.get("command", ()))
             verification_description = item["description"]
             if verification_kind == VerificationKind.MANUAL and verification_command:
-                # Models sometimes place human-readable inspection steps in the
-                # command field. Preserve those steps as description text, but
-                # never reinterpret executable-looking commands as manual checks.
+                # Models frequently put shell commands in a manual criterion's
+                # command field despite explicit schema instructions. Preserve
+                # them as reviewer guidance, but clear the executable command
+                # field so ALISA never runs them or treats them as verified.
                 manual_steps = tuple(str(part).strip() for part in verification_command)
-                if not all(self._is_manual_instruction(part) for part in manual_steps):
-                    raise ValueError(
-                        f"verification[{index - 1}] ({criterion_id}) is manual but its "
-                        f"command contains executable-looking content: {manual_steps!r}; "
-                        "set command to [] "
-                        "and put human instructions in description, or use an automated "
-                        "verification kind for executable commands"
+                if all(self._is_manual_instruction(part) for part in manual_steps):
+                    verification_description = (
+                        str(verification_description).rstrip()
+                        + "\\nManual verification steps:\\n"
+                        + "\\n".join(f"- {part}" for part in manual_steps)
                     )
-                verification_description = (
-                    str(verification_description).rstrip()
-                    + "\nManual verification steps:\n"
-                    + "\n".join(f"- {part}" for part in manual_steps)
-                )
+                    repair_action = "move_manual_instructions_to_description"
+                else:
+                    suggested_commands = self._format_manual_command_suggestions(
+                        manual_steps
+                    )
+                    verification_description = (
+                        str(verification_description).rstrip()
+                        + "\\nSuggested reviewer commands (not executed by ALISA):\\n"
+                        + "\\n".join(f"- `{part}`" for part in suggested_commands)
+                    )
+                    repair_action = "move_manual_command_suggestions_to_description"
                 verification_command = ()
+                manual_command_repairs.append({
+                    "criterion_id": str(criterion_id),
+                    "action": repair_action,
+                    "original_command": list(manual_steps),
+                    "result": "command cleared; content retained as non-executed reviewer guidance",
+                })
             verification.append(VerificationCriterion(
                 criterion_id=str(criterion_id), description=verification_description,
                 kind=verification_kind,
                 required=item.get("required", True),
                 command=verification_command,
-                covers=tuple(item.get("covers", ())),
-                covers_acceptance_criteria=tuple(item.get("covers_acceptance_criteria", ())),
+                covers=tuple(item.get("covers", ()))
             ))
         verification, manual_instruction_repairs = (
             self._filter_manual_implementation_instructions(verification)
@@ -2216,6 +2768,18 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 contracts or (),
             )
             completion_repairs["implementation_units"].extend(mapping_repairs)
+            units, cross_cutting_repairs = self._complete_cross_cutting_requirement_coverage(
+                units, requirements, architecture_paths
+            )
+            completion_repairs["implementation_units"].extend(
+                cross_cutting_repairs
+            )
+            units, cross_cutting_repairs = self._complete_cross_cutting_requirement_coverage(
+                units, requirements, architecture_paths
+            )
+            completion_repairs["implementation_units"].extend(
+                cross_cutting_repairs
+            )
             units, verification, normalization_repairs = (
                 self._normalize_implementation_units(
                     units, verification, requirements, contracts or ()
@@ -2224,10 +2788,26 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             completion_repairs["implementation_units"].extend(
                 normalization_repairs
             )
-            units, criterion_mapping_repairs = self._normalize_acceptance_criterion_implementation_mapping(
-                units, requirements
-            )
-            completion_repairs["implementation_units"].extend(criterion_mapping_repairs)
+            try:
+                self._assert_repairs_preserve_implementation_coverage(
+                    original_units, units, requirements
+                )
+            except ValueError as exc:
+                self._write_diagnostic(
+                    "integration_coverage_repair_regression.json",
+                    {
+                        "error": str(exc),
+                        "original_coverage": sorted({
+                            requirement_id for unit in original_units
+                            for requirement_id in unit.satisfies
+                        }),
+                        "repaired_coverage": sorted({
+                            requirement_id for unit in units
+                            for requirement_id in unit.satisfies
+                        }),
+                    },
+                )
+                raise
             verification, verification_repairs = (
                 self._complete_verification_coverage(
                     verification, units, requirements
@@ -2235,6 +2815,7 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             )
             completion_repairs["verification"] = [
                 *manual_instruction_repairs,
+                *manual_command_repairs,
                 *verification_repairs,
             ]
             if any(completion_repairs.values()):
@@ -2252,6 +2833,32 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
 
         return units, verification
 
+    @staticmethod
+    def _assert_repairs_preserve_implementation_coverage(
+        original_units, repaired_units, requirements
+    ):
+        """Reject deterministic repairs that erase existing required coverage."""
+        required_ids = {
+            item.requirement_id for item in requirements
+            if item.kind != RequirementKind.CONSTRAINT
+        }
+        before = {
+            requirement_id for unit in original_units
+            for requirement_id in unit.satisfies
+            if requirement_id in required_ids
+        }
+        after = {
+            requirement_id for unit in repaired_units
+            for requirement_id in unit.satisfies
+            if requirement_id in required_ids
+        }
+        lost = sorted(before - after)
+        if lost:
+            raise ValueError(
+                "deterministic completion repairs removed existing "
+                f"implementation-unit requirement coverage: {lost}"
+            )
+
     @classmethod
     def _validate_integration_coverage(
         cls, units, verification, requirements, *, architecture_paths=None
@@ -2263,7 +2870,6 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         required_unit_ids = {
             item.requirement_id for item in requirements
             if item.kind != RequirementKind.CONSTRAINT
-            and not cls._is_directory_only_requirement(item)
         }
 
         unit_coverage = {req_id for unit in units for req_id in unit.satisfies}
@@ -2291,62 +2897,36 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         }
         missing_units = required_unit_ids - unit_coverage
         missing_verification = requirement_ids - verification_coverage
-        all_acceptance_ids = {
-            criterion_id for requirement in requirements
-            for criterion_id in requirement.acceptance_criterion_ids
-        }
-        required_implementation_acceptance_ids = {
-            criterion_id
-            for requirement in requirements
-            if requirement.kind != RequirementKind.CONSTRAINT
-            and not cls._is_directory_only_requirement(requirement)
-            for criterion_id in requirement.acceptance_criterion_ids
-        }
-        implemented_acceptance_ids = {
-            criterion_id for unit in units
-            for criterion_id in unit.implements_acceptance_criteria
-        }
-        verified_acceptance_ids = {
-            criterion_id for criterion in verification if criterion.required
-            for criterion_id in criterion.covers_acceptance_criteria
-        }
-        # Compatibility for hand-authored/legacy specifications: a structural
-        # check directly covering a directory-only requirement verifies its
-        # directory-existence acceptance criteria. Generated specifications
-        # receive explicit covers_acceptance_criteria mappings above.
-        for criterion in verification:
-            if not criterion.required or criterion.kind != VerificationKind.STRUCTURAL:
-                continue
-            for requirement_id in criterion.covers:
-                requirement = requirement_by_id.get(requirement_id)
-                if requirement and cls._is_directory_only_requirement(requirement):
-                    verified_acceptance_ids.update(requirement.acceptance_criterion_ids)
-        missing_implementation_acceptance = (
-            required_implementation_acceptance_ids - implemented_acceptance_ids
-        )
-        missing_verification_acceptance = all_acceptance_ids - verified_acceptance_ids
-        unknown_implementation_acceptance = implemented_acceptance_ids - all_acceptance_ids
-        unknown_verification_acceptance = {
-            criterion_id for criterion in verification
-            for criterion_id in criterion.covers_acceptance_criteria
-            if criterion_id not in all_acceptance_ids
-        }
 
         missing_file_units = []
-        missing_directory_verification = []
+        missing_directories = []
         if architecture_paths is not None:
+            normalized_architecture_paths = {
+                path.replace("\\", "/") for path in architecture_paths
+            }
             for requirement in requirements:
-                if not cls._is_directory_only_requirement(requirement):
+                if requirement.kind == RequirementKind.CONSTRAINT:
                     continue
-                structural_coverage = [
-                    criterion for criterion in verification
-                    if requirement.requirement_id in criterion.covers
-                    and criterion.kind == VerificationKind.STRUCTURAL
-                ]
-                if not structural_coverage:
-                    missing_directory_verification.append(requirement.requirement_id)
+                for directory in sorted(cls._explicit_requirement_directories(requirement)):
+                    prefix = directory.rstrip("/") + "/"
+                    architecture_children = {
+                        path for path in normalized_architecture_paths
+                        if path.startswith(prefix)
+                    }
+                    implemented_children = {
+                        unit.target_path.replace("\\", "/")
+                        for unit in units
+                        if unit.target_path.replace("\\", "/") in architecture_children
+                        and requirement.requirement_id in unit.satisfies
+                    }
+                    if not architecture_children or not implemented_children:
+                        missing_directories.append(
+                            f"{requirement.requirement_id}: {directory}/"
+                        )
             for path, requirement_ids_for_path in sorted(
-                cls._required_architecture_paths(requirements).items()
+                cls._required_architecture_paths(
+                    requirements, normalized_architecture_paths
+                ).items()
             ):
                 for requirement_id in sorted(requirement_ids_for_path):
                     requirement = requirement_by_id[requirement_id]
@@ -2366,42 +2946,27 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             )
         if missing_verification:
             diagnostics.append(f"requirements lack verification coverage: {sorted(missing_verification)}")
-        if missing_implementation_acceptance:
-            diagnostics.append(
-                "acceptance criteria lack implementation-unit coverage: "
-                f"{sorted(missing_implementation_acceptance)}"
-            )
-        if missing_verification_acceptance:
-            diagnostics.append(
-                "acceptance criteria lack verification coverage: "
-                f"{sorted(missing_verification_acceptance)}"
-            )
-        if unknown_implementation_acceptance:
-            diagnostics.append(
-                "implementation units reference unknown acceptance criteria: "
-                f"{sorted(unknown_implementation_acceptance)}"
-            )
-        if unknown_verification_acceptance:
-            diagnostics.append(
-                "verification criteria reference unknown acceptance criteria: "
-                f"{sorted(unknown_verification_acceptance)}"
-            )
         if missing_file_units:
             diagnostics.append(
                 "requirements lack a dedicated implementation unit for required file path(s): "
                 + ", ".join(missing_file_units)
             )
-        if missing_directory_verification:
+        if missing_directories:
             diagnostics.append(
-                "directory-only requirements need structural verification coverage: "
-                + ", ".join(sorted(missing_directory_verification))
+                "directory requirements lack implementation units beneath every required directory: "
+                + ", ".join(missing_directories)
             )
         if unknown_unit_requirements:
             diagnostics.append(f"implementation units reference unknown requirements: {sorted(unknown_unit_requirements)}")
         if unknown_verification_refs:
             diagnostics.append(f"verification criteria cover unknown references: {sorted(unknown_verification_refs)}")
         if unknown_dependencies:
-            diagnostics.append(f"implementation units reference unknown dependencies: {sorted(unknown_dependencies)}")
+            diagnostics.append(
+                "implementation units have unknown depends_on references: "
+                f"{sorted(unknown_dependencies)}; depends_on must contain implementation "
+                "unit_id values only (for example, UNIT-001), never contract IDs; "
+                "put contract references in implements"
+            )
 
         if diagnostics:
             raise ValueError("; ".join(diagnostics))
@@ -2478,7 +3043,6 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         required_unit_ids = {
             r.requirement_id for r in spec.requirements
             if r.kind != RequirementKind.CONSTRAINT
-            and not EngineeringSpecificationGenerator._is_directory_only_requirement(r)
         }
         unit_coverage = {r for u in spec.implementation_units for r in u.satisfies}
         verified = {
@@ -2507,18 +3071,6 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             )
         if missing_verification:
             raise ValueError(f"requirements lack verification coverage: {sorted(missing_verification)}")
-        for requirement in spec.requirements:
-            if not EngineeringSpecificationGenerator._is_directory_only_requirement(requirement):
-                continue
-            if not any(
-                requirement.requirement_id in criterion.covers
-                and criterion.kind == VerificationKind.STRUCTURAL
-                for criterion in spec.verification
-            ):
-                raise ValueError(
-                    "directory-only requirement needs structural verification coverage: "
-                    f"{requirement.requirement_id}"
-                )
 
     @staticmethod
     def _slug(value):
@@ -2528,12 +3080,29 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
     @staticmethod
     def _requirement_dict(x):
         return {"requirement_id":x.requirement_id,"description":x.description,"kind":x.kind.value,
-                "acceptance_criteria":list(x.acceptance_criteria),
-                "acceptance_criterion_ids":list(x.acceptance_criterion_ids),"priority":x.priority}
+                "acceptance_criteria":list(x.acceptance_criteria),"priority":x.priority}
     @staticmethod
     def _module_dict(x):
         return {"module_id":x.module_id,"name":x.name,"responsibility":x.responsibility,
                 "depends_on":list(x.depends_on),"file_paths":list(x.file_paths)}
+    @staticmethod
+    def _unit_dict(x):
+        return {
+            "unit_id": x.unit_id, "title": x.title, "target_path": x.target_path,
+            "kind": x.kind.value, "depends_on": list(x.depends_on),
+            "satisfies": list(x.satisfies), "implements": list(x.implements),
+            "acceptance_criteria": list(x.acceptance_criteria),
+        }
+
+    @staticmethod
+    def _verification_dict(x):
+        return {
+            "criterion_id": x.criterion_id, "description": x.description,
+            "kind": x.kind.value, "required": x.required,
+            "command": list(x.command), "covers": list(x.covers),
+            "covers_acceptance_criteria": list(x.covers_acceptance_criteria),
+        }
+
     @staticmethod
     def _contract_dict(x):
         return {"contract_id":x.contract_id,"owner":x.owner,"name":x.name,"kind":x.kind,

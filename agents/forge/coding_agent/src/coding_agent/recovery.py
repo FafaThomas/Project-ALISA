@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 
 from coding_agent.change_journal import ChangeJournal, JournalEntry
-from coding_agent.change_tracking import content_hash, DIRECTORY_STATE_HASH
+from coding_agent.change_tracking import content_hash
 from coding_agent.workspace import Workspace, WorkspaceError
 
 from coding_agent.workspace_writer import (
@@ -70,7 +70,6 @@ class RecoveryDecision:
 def _inspect_current_hash(
     workspace: Workspace,
     relative_path: str,
-    operation: str = "create",
 ) -> tuple[bool, str | None]:
     """Return (safe_to_inspect, current_hash); None hash means absent."""
     raw = relative_path.replace("\\", "/")
@@ -88,14 +87,7 @@ def _inspect_current_hash(
 
     try:
         if candidate.exists() or candidate.is_symlink():
-            if operation == "mkdir" and candidate.is_symlink():
-                return False, None
             resolved = workspace.resolve_path(relative_path)
-
-            if operation == "mkdir":
-                if not resolved.is_dir() or resolved.is_symlink():
-                    return False, None
-                return True, DIRECTORY_STATE_HASH
 
             if not resolved.is_file():
                 return False, None
@@ -173,7 +165,6 @@ def assess_recovery(
         safe, current_hash = _inspect_current_hash(
             workspace,
             entry.relative_path,
-            entry.operation,
         )
 
         if not safe:
@@ -267,7 +258,7 @@ def decide_recovery(candidate: RecoveryCandidate) -> RecoveryDecision:
                 "Contents match the original state; reconcile the interrupted rollback.",
             )
 
-        if candidate.operation in {"create", "mkdir"} or candidate.recovery_bytes is not None:
+        if candidate.operation == "create" or candidate.recovery_bytes is not None:
             return decision(
                 RecoveryAction.RESTORE_ORIGINAL,
                 "The change appears applied; original-state recovery data is available or the created file can be removed.",
@@ -335,7 +326,6 @@ def execute_recovery(
     safe, current_hash = _inspect_current_hash(
         workspace,
         candidate.relative_path,
-        candidate.operation,
     )
     if not safe:
         return result(False, False, "Workspace path is no longer safe to inspect.")
@@ -466,7 +456,7 @@ def execute_recovery(
                 "Preconditions for restoring the original state are not met.",
             )
 
-        if candidate.operation not in {"create", "mkdir"} and candidate.recovery_bytes is None:
+        if candidate.operation != "create" and candidate.recovery_bytes is None:
             return result(
                 False,
                 False,

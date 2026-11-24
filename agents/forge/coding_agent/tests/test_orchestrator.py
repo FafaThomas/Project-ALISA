@@ -590,9 +590,14 @@ def test_verification_failure_can_retry_with_diagnostics_and_fresh_approval(tmp_
     ]
     assert [event["event"] for event in events] == [
         "attempt_started", "attempt_failed", "failure_diagnosed",
-        "repair_strategy_generated", "retry_approved",
+        "repair_strategy_generated", "retry_approved", "recovery_context_built",
         "attempt_started", "task_completed",
     ]
+    # The saved recovery context is exactly what the next attempt received.
+    saved = next(event for event in events if event["event"] == "recovery_context_built")
+    saved_text = Path(saved["details"]["path"]).read_text(encoding="utf-8")
+    assert saved["details"]["chars"] == len(saved_text)
+    assert saved_text in planner.contexts[1]
 
 
 def test_retry_declined_leaves_failed_attempt_rolled_back(tmp_path):
@@ -881,6 +886,36 @@ def test_historical_context_excludes_unrelated_task_and_change_history(tmp_path)
     assert "\\n" not in history
 
 
+def test_historical_context_keeps_task_history_when_journal_is_busy(tmp_path):
+    # Regression: the 30-line limit was applied before the task filter, so 40
+    # unrelated later records pushed this task's own history out of the window.
+    journal_dir = tmp_path / ".coding-agent"
+    journal_dir.mkdir()
+    other_tasks = [
+        f'{{"task_id":"other-{index}","event":"task_started","attempt":1,"details":{{}}}}'
+        for index in range(40)
+    ]
+    (journal_dir / "tasks.jsonl").write_text(
+        '\n'.join([
+            '{"task_id":"current-task","event":"failed","attempt":1,"details":{"errors":"architecture stage failed"}}',
+            *other_tasks,
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    workspace = Workspace(tmp_path)
+    orchestrator = TaskOrchestrator(
+        planner=FakePlanner(),
+        coordinator=ChangeCoordinator(workspace, journal=ChangeJournal(journal_dir / "changes.jsonl")),
+        command_runner=FakeCommandRunner(workspace),
+        verification_engine=VerificationEngine(),
+    )
+
+    history = orchestrator._historical_context("current-task")
+
+    assert "architecture stage failed" in history
+    assert "other-" not in history
+
+
 def test_operation_normalization_preserves_semantically_valid_espec_content(tmp_path):
     from coding_agent.engineering_spec import (
         EngineeringSpecification, ImplementationUnit, Requirement,
@@ -1084,6 +1119,7 @@ def test_required_manual_criterion_blocks_completion_and_rolls_back(tmp_path):
 def test_espec_generation_failure_is_journaled_before_attempt_loop(tmp_path):
     class ESpecClient:
         def __init__(self):
+            self.unloaded = False
             requirement = {"requirement_id": "REQ-001", "description": "Task form works",
                            "kind": "functional", "acceptance_criteria": ["Can submit"],
                            "priority": "high"}
@@ -1110,10 +1146,18 @@ def test_espec_generation_failure_is_journaled_before_attempt_loop(tmp_path):
         def generate_json(self, prompt):
             return self.payloads.pop(0)
 
+        def unload(self):
+            self.unloaded = True
+            return True
+
     task = make_task(tmp_path)
     orchestrator, _, planner, runner = make_orchestrator(tmp_path, make_plan(task, changes=[], commands=[]))
-    planner.client = ESpecClient()
+    from coding_agent.retry import RetryPolicy
+    orchestrator.retry_policy = RetryPolicy(max_attempts=1)
+    specification_client = ESpecClient()
+    orchestrator.specification_client = specification_client
     result = orchestrator.run(task, approval_handler=lambda proposed: True)
+    assert specification_client.unloaded is True
     assert result.status == TaskStatus.FAILED
     assert any("lack implementation-unit coverage" in e for e in result.errors)
     assert runner.calls == []
@@ -1128,6 +1172,128 @@ def test_espec_generation_failure_is_journaled_before_attempt_loop(tmp_path):
     assert (diagnostics / "integration_attempt_2.json").is_file()
     assert (diagnostics / "validation_errors.json").is_file()
 
+
+
+def test_invalid_generated_python_gets_one_bounded_planning_correction(tmp_path):
+    from coding_agent.engineering_spec import (
+        ArchitectureModule, EngineeringSpecification, ImplementationUnit, Requirement,
+    )
+
+    task = make_task(tmp_path)
+    specification = EngineeringSpecification(
+        specification_id="spec-python-syntax-repair",
+        task_id=task.task_id,
+        objective="Create valid Python configuration",
+        workspace=str(tmp_path),
+        requirements=(Requirement("REQ-1", "Create Python configuration."),),
+        architecture=(
+            ArchitectureModule(
+                "config", "Configuration", "Python configuration",
+                file_paths=("config.py",),
+            ),
+        ),
+        implementation_units=(
+            ImplementationUnit(
+                "UNIT-1", "Python configuration", "config.py",
+                satisfies=("REQ-1",),
+            ),
+        ),
+    )
+    valid_plan = make_plan(task, changes=[
+        FileChange(
+            "config.py", ChangeType.CREATE, "Create valid Python configuration",
+            "SETTING = True\\n",
+        ),
+    ], commands=[])
+
+    class SyntaxThenValidPlanner:
+        def __init__(self):
+            self.contexts = []
+            self.calls = 0
+
+        def plan(self, requested_task, context="", specification=None):
+            self.contexts.append(context)
+            self.calls += 1
+            if self.calls == 1:
+                raise ValueError(
+                    "Generated Python content for 'config.py' is not syntactically "
+                    "valid: invalid syntax (line 1). The plan was rejected before "
+                    "approval; no workspace files were changed."
+                )
+            return valid_plan
+
+    workspace = Workspace(tmp_path)
+    planner = SyntaxThenValidPlanner()
+    orchestrator = TaskOrchestrator(
+        planner,
+        ChangeCoordinator(workspace),
+        FakeCommandRunner(workspace),
+        VerificationEngine(),
+        max_planning_corrections=1,
+    )
+
+    result = orchestrator.run(
+        task,
+        approval_handler=lambda proposed: False,
+        specification=specification,
+    )
+
+    assert result.status == TaskStatus.BLOCKED
+    assert planner.calls == 2
+    assert "PLAN CONTENT SYNTAX FAILURE" in planner.contexts[1]
+    assert "config.py" in planner.contexts[1]
+    assert "invalid syntax" in planner.contexts[1]
+    assert not (tmp_path / "config.py").exists()
+
+
+def test_espec_generation_is_retried_under_the_task_attempt_budget(tmp_path):
+    # A specification failure should not end the task while attempts remain.
+    # The orchestrator must generate again and record the retry.
+    from coding_agent.retry import RetryPolicy
+
+    class RetryingESpecClient:
+        def __init__(self):
+            self.calls = 0
+            self.unloaded = False
+            requirement = {"requirement_id": "REQ-001", "description": "Task form works",
+                           "kind": "functional", "acceptance_criteria": ["Can submit"],
+                           "priority": "high"}
+            architecture = {"module_id": "MOD-001", "name": "Form",
+                            "responsibility": "Render form", "depends_on": [],
+                            "file_paths": ["src/Form.jsx"]}
+            contract = {"contract_id": "CON-001", "owner": "MOD-001", "name": "Form",
+                        "kind": "component", "inputs": [], "outputs": [], "invariants": []}
+            bad_integration = {"implementation_units": [], "verification": []}
+            self.responses = [
+                {"requirements": [requirement]}, {"architecture": [architecture]},
+                {"contracts": [contract]}, bad_integration, bad_integration,
+            ]
+
+        def generate_json(self, prompt):
+            self.calls += 1
+            if self.responses:
+                return self.responses.pop(0)
+            raise RuntimeError("model exhausted for this test")
+
+        def unload(self):
+            self.unloaded = True
+            return True
+
+    task = make_task(tmp_path)
+    orchestrator, _, _, runner = make_orchestrator(tmp_path, make_plan(task, changes=[], commands=[]))
+    orchestrator.retry_policy = RetryPolicy(max_attempts=2)
+    client = RetryingESpecClient()
+    orchestrator.specification_client = client
+
+    result = orchestrator.run(task, approval_handler=lambda proposed: True)
+
+    assert result.status == TaskStatus.FAILED
+    assert client.calls > 5  # the first specification attempt was followed by a second one
+    assert runner.calls == []
+    events = [json.loads(line) for line in
+              (tmp_path / ".coding-agent" / "tasks.jsonl").read_text(encoding="utf-8").splitlines()]
+    names = [e["event"] for e in events]
+    assert names == ["engineering_specification_retry", "engineering_specification_failed"]
 
 
 def test_espec_plan_correction_targets_missing_units_and_exempts_unmapped_constraints(tmp_path):
@@ -1258,49 +1424,137 @@ def test_manual_verification_handler_records_human_evidence_and_completes(tmp_pa
     assert result.specification_report["criteria"][0]["human_evidence"].startswith("Inspected config.txt")
 
 
-def test_orchestrator_applies_parent_and_child_directory_operations_in_order(tmp_path):
+def test_espec_repair_paths_selects_missing_units_and_semantically_invalid_requirement_files(tmp_path):
+    from types import SimpleNamespace
+    from coding_agent.engineering_spec import (
+        EngineeringSpecification, ImplementationUnit, Requirement,
+    )
+
     task = make_task(tmp_path)
-    plan = make_plan(task, changes=[
-        FileChange("frontend", ChangeType.MKDIR, "Create frontend directory"),
-        FileChange("frontend/src", ChangeType.MKDIR, "Create frontend source directory"),
-        FileChange("frontend/src/app.py", ChangeType.CREATE, "Create app module", "VALUE = 1\n"),
-    ], commands=[])
-    orchestrator, _, _, _ = make_orchestrator(tmp_path, plan)
+    specification = EngineeringSpecification(
+        specification_id="spec-targeted-repair",
+        task_id=task.task_id,
+        objective="Repair application plan",
+        workspace=str(tmp_path),
+        requirements=(
+            Requirement("REQ-DOCKER", "Configure PostgreSQL healthcheck."),
+            Requirement("REQ-README", "Complete README instructions."),
+        ),
+        implementation_units=(
+            ImplementationUnit(
+                "UNIT-DOCKER", "Compose healthcheck", "docker-compose.yml",
+                satisfies=("REQ-DOCKER",),
+            ),
+            ImplementationUnit(
+                "UNIT-README", "README instructions", "README.md",
+                satisfies=("REQ-README",),
+            ),
+        ),
+    )
+    report = SimpleNamespace(
+        missing_units=("UNIT-README -> README.md",),
+        covered_units=("UNIT-DOCKER",),
+        missing_requirements=("REQ-README",),
+        semantic_issues=("REQ-DOCKER: PostgreSQL readiness healthcheck using pg_isready is missing",),
+    )
 
-    result = orchestrator.run(task, approval_handler=lambda proposed: True)
-
-    assert result.status == TaskStatus.COMPLETED, result.errors
-    assert (tmp_path / "frontend").is_dir()
-    assert (tmp_path / "frontend/src").is_dir()
-    assert (tmp_path / "frontend/src/app.py").read_text(encoding="utf-8") == "VALUE = 1\n"
-    assert result.changed_files == ("frontend", "frontend/src", "frontend/src/app.py")
+    paths = TaskOrchestrator._espec_repair_paths(specification, report)
+    assert paths == ("docker-compose.yml", "README.md")
 
 
-def test_orchestrator_rejects_child_directory_before_parent(tmp_path):
+def test_merge_focused_espec_repair_preserves_valid_files_and_replaces_only_targets(tmp_path):
     task = make_task(tmp_path)
-    plan = make_plan(task, changes=[
-        FileChange("frontend/src", ChangeType.MKDIR, "Create nested source directory"),
-        FileChange("frontend", ChangeType.MKDIR, "Create frontend directory"),
+    original = make_plan(task, changes=[
+        FileChange("frontend/src/App.tsx", ChangeType.CREATE, "Frontend", "export default 1;\\n"),
+        FileChange("docker-compose.yml", ChangeType.CREATE, "Old Compose", "services: {}\\n"),
     ], commands=[])
-    orchestrator, _, _, runner = make_orchestrator(tmp_path, plan)
+    repaired_compose = FileChange(
+        "docker-compose.yml", ChangeType.CREATE, "Correct healthcheck",
+        "services:\\n  postgres:\\n    image: postgres:17\\n",
+    )
+    repaired_readme = FileChange(
+        "README.md", ChangeType.CREATE, "Complete instructions", "# Setup\\n",
+    )
 
-    result = orchestrator.run(task, approval_handler=lambda proposed: True)
+    merged = TaskOrchestrator._merge_focused_espec_repair(
+        original,
+        (repaired_compose, repaired_readme),
+        ("docker-compose.yml", "README.md"),
+        (),
+    )
 
-    assert result.status == TaskStatus.FAILED
-    assert any("add a parent mkdir operation before" in error for error in result.errors)
-    assert not (tmp_path / "frontend").exists()
-    assert runner.calls == []
+    assert [change.path for change in merged.changes] == [
+        "frontend/src/App.tsx", "docker-compose.yml", "README.md"
+    ]
+    assert merged.changes[0].content == "export default 1;\\n"
+    assert merged.changes[1].content == repaired_compose.content
 
 
-def test_orchestrator_does_not_create_directories_without_approval(tmp_path):
+def test_orchestrator_uses_focused_repair_for_missing_espec_units(tmp_path):
+    from coding_agent.engineering_spec import (
+        EngineeringSpecification, ImplementationUnit, Requirement,
+    )
+
     task = make_task(tmp_path)
-    plan = make_plan(task, changes=[
-        FileChange("backend", ChangeType.MKDIR, "Create backend directory"),
+    specification = EngineeringSpecification(
+        specification_id="spec-orchestrated-focused-repair",
+        task_id=task.task_id,
+        objective="Create config and documentation",
+        workspace=str(tmp_path),
+        requirements=(
+            Requirement("REQ-CONFIG", "Create application configuration"),
+            Requirement("REQ-DOC", "Complete README setup instructions"),
+        ),
+        implementation_units=(
+            ImplementationUnit(
+                "UNIT-CONFIG", "Application configuration", "config.yml",
+                satisfies=("REQ-CONFIG",),
+            ),
+            ImplementationUnit(
+                "UNIT-README", "README setup instructions", "README.md",
+                satisfies=("REQ-DOC",),
+            ),
+        ),
+    )
+    incomplete = make_plan(task, changes=[
+        FileChange(
+            "config.yml", ChangeType.CREATE, "Create configuration", "enabled: true\\n"
+        ),
     ], commands=[])
-    orchestrator, _, _, runner = make_orchestrator(tmp_path, plan)
 
-    result = orchestrator.run(task, approval_handler=lambda proposed: False)
+    class FocusedRepairPlanner:
+        def __init__(self):
+            self.repair_request = None
+
+        def plan(self, requested_task, context="", specification=None):
+            return incomplete
+
+        def repair_missing_changes(self, requested_task, **kwargs):
+            self.repair_request = kwargs
+            return (
+                FileChange(
+                    "README.md", ChangeType.CREATE,
+                    "Document setup instructions", "# Setup\\n\\nRun the application.\\n",
+                ),
+            )
+
+    workspace = Workspace(tmp_path)
+    planner = FocusedRepairPlanner()
+    orchestrator = TaskOrchestrator(
+        planner,
+        ChangeCoordinator(workspace),
+        FakeCommandRunner(workspace),
+        VerificationEngine(),
+    )
+
+    result = orchestrator.run(
+        task,
+        approval_handler=lambda proposed: False,
+        specification=specification,
+    )
 
     assert result.status == TaskStatus.BLOCKED
-    assert not (tmp_path / "backend").exists()
-    assert runner.calls == []
+    assert planner.repair_request is not None
+    assert planner.repair_request["required_paths"] == ("README.md",)
+    assert not (tmp_path / "config.yml").exists()
+    assert not (tmp_path / "README.md").exists()

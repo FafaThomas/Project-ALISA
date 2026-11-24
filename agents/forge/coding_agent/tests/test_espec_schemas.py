@@ -61,7 +61,7 @@ def test_contract_stage_allows_no_contracts_for_infrastructure_tasks():
 
 
 def test_integration_payload_checks_unit_references_and_accepts_legacy_verification_ids():
-    with pytest.raises(ValidationError, match="references unknown dependencies"):
+    with pytest.raises(ValidationError, match="unknown depends_on references"):
         IntegrationStagePayload.model_validate({
             "implementation_units": [{
                 "unit_id": "UNIT-1",
@@ -136,4 +136,74 @@ def test_requirements_payload_rejects_duplicate_acceptance_criterion_ids_across_
                     "acceptance_criterion_ids": ["SHARED-AC-001"],
                 },
             ]
+        })
+
+
+
+def test_integration_payload_still_rejects_duplicate_references_without_generator_normalization():
+    with pytest.raises(ValidationError, match="references must be unique"):
+        IntegrationStagePayload.model_validate({
+            "implementation_units": [{
+                "unit_id": "UNIT-1",
+                "title": "Create file",
+                "target_path": "file.txt",
+                "satisfies": ["REQ-1", "REQ-1"],
+            }],
+            "verification": [{
+                "criterion_id": "VER-1",
+                "description": "Check file",
+                "kind": "static",
+            }],
+        })
+
+
+
+def test_integration_payload_explains_contract_ids_are_not_unit_dependencies():
+    with pytest.raises(
+        ValidationError,
+        match="depends_on must contain implementation unit_id values only.*contract IDs",
+    ):
+        IntegrationStagePayload.model_validate({
+            "implementation_units": [
+                {
+                    "unit_id": "UNIT-001",
+                    "title": "Game logic",
+                    "target_path": "game.py",
+                    "kind": "source",
+                    "depends_on": [],
+                    "implements": ["CON-001"],
+                },
+                {
+                    "unit_id": "UNIT-002",
+                    "title": "Application entry point",
+                    "target_path": "main.py",
+                    "kind": "source",
+                    "depends_on": ["CON-001"],
+                    "implements": [],
+                },
+            ],
+            "verification": [{"description": "Check", "kind": "static"}],
+        })
+
+
+def test_integration_payload_rejects_multiple_units_for_the_same_target_path():
+    with pytest.raises(ValidationError, match="exactly one implementation unit"):
+        IntegrationStagePayload.model_validate({
+            "implementation_units": [
+                {
+                    "unit_id": "UNIT-001",
+                    "title": "First change",
+                    "target_path": "main.py",
+                    "kind": "source",
+                    "depends_on": [],
+                },
+                {
+                    "unit_id": "UNIT-002",
+                    "title": "Second change",
+                    "target_path": "main.py",
+                    "kind": "source",
+                    "depends_on": [],
+                },
+            ],
+            "verification": [{"description": "Check", "kind": "static"}],
         })

@@ -23,10 +23,6 @@ for item in changes:
         errors.append(f"Path escapes workspace: {item['path']}")
         continue
     operation = item["operation"]
-    if operation == "mkdir":
-        if not candidate.is_dir() or candidate.is_symlink():
-            errors.append(f"Expected directory is missing or unsafe: {item['path']}")
-        continue
     if operation == "delete":
         if candidate.exists():
             errors.append(f"Deleted path still exists: {item['path']}")
@@ -64,7 +60,7 @@ class VerificationPlanner:
             if candidate.suffix.lower() == ".py" and (
                 candidate.name.startswith("test_")
                 or candidate.name.endswith("_test.py")
-            ) and change.change_type.value not in {"delete", "mkdir"}:
+            ) and change.change_type.value != "delete":
                 return True
 
         for path in self.root.rglob("*.py"):

@@ -7,6 +7,7 @@ from coding_agent.models import (
 )
 from coding_agent.repair_intelligence import (
     FailureCategory,
+    FailureDiagnosis,
     FailureDiagnoser,
     FailurePhase,
     RepairStrategyGenerator,
@@ -144,3 +145,33 @@ def test_unknown_failure_is_not_automatically_actionable():
     assert diagnosis.category == FailureCategory.UNKNOWN_FAILURE
     assert diagnosis.actionable is False
     assert diagnosis.confidence == "low"
+
+
+def test_espec_plan_repair_strategy_extracts_affected_paths_and_specific_actions():
+    result = failed_result(errors=(
+        "Context preparation or planning failed: ESpec plan validation failed after bounded corrections: "
+        "Plan does not implement required ESpec implementation units: "
+        "UNIT-001 -> backend/Dockerfile, UNIT-008 -> README.md | "
+        "REQ-007: PostgreSQL readiness healthcheck using pg_isready is missing | "
+        "REQ-010: project.yaml omits approved stack and parent phases",
+    ))
+    diagnosis = FailureDiagnosis(
+        phase=FailurePhase.PLANNING,
+        category=FailureCategory.PLANNING_FAILURE,
+        summary="ESpec plan validation failed",
+        evidence=result.errors,
+        likely_causes=("Required file groups were omitted or incomplete.",),
+        confidence="high",
+        actionable=True,
+    )
+
+    strategy = RepairStrategyGenerator().generate(diagnosis, result)
+
+    assert strategy.affected_paths == (
+        "backend/Dockerfile", "README.md", "docker-compose.yml", "project.yaml"
+    )
+    assert any("Do not regenerate the entire project plan unchanged" in item for item in strategy.instructions)
+    assert any("pg_isready" in item for item in strategy.instructions)
+    assert any("all six parent phase IDs" in item for item in strategy.instructions)
+    assert "Preserve unaffected plan files and repair only the exact affected ESpec paths." in strategy.constraints
+    assert "Return a complete fresh implementation plan and keep human approval required." not in strategy.constraints

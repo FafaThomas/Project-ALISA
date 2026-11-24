@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import json
 from pathlib import Path
 
@@ -111,20 +113,26 @@ def _patch_coding_workflow(monkeypatch, *, command_succeeds=True):
                 stdout="checks passed" if command_succeeds else "checks failed",
             )
 
-    monkeypatch.setattr("coding_agent.cli.OllamaClient", lambda: object())
+    client_roles = []
+    monkeypatch.setattr(
+        "coding_agent.cli.OllamaClient",
+        lambda **kwargs: client_roles.append(kwargs.get("role")) or object(),
+    )
     monkeypatch.setattr("coding_agent.cli.CodingPlanner", FakePlanner)
     monkeypatch.setattr("coding_agent.cli.CommandRunner", FakeRunner)
+    return client_roles
 
 
 def test_run_command_rejection_does_not_modify_workspace(tmp_path, capsys, monkeypatch):
     workspace = _workspace(tmp_path)
     original = (workspace / "app.py").read_text(encoding="utf-8")
-    _patch_coding_workflow(monkeypatch)
+    client_roles = _patch_coding_workflow(monkeypatch)
     monkeypatch.setattr("builtins.input", lambda _prompt: "no")
 
     result = main(["run", str(workspace), "Change the application value"])
 
     assert result == 2
+    assert client_roles == ["planning", "coding"]
     assert (workspace / "app.py").read_text(encoding="utf-8") == original
     output = capsys.readouterr().out
     assert "IMPLEMENTATION PLAN" in output
@@ -169,3 +177,26 @@ def test_collect_manual_verification_requires_explicit_decision_and_evidence(mon
         "VER-1": {"status": "PASS", "evidence": "Inspected the output file and confirmed the expected configuration."},
         "VER-2": {"status": "FAIL", "evidence": "The readiness check is missing."},
     }
+
+
+def test_manual_evidence_file_accepts_only_explicit_pass_or_fail(tmp_path):
+    from coding_agent.cli import _load_manual_evidence
+
+    good = tmp_path / "evidence.json"
+    good.write_text(
+        '{"VER-001": {"status": "pass", "evidence": "Ran python main.py; window opened"}}',
+        encoding="utf-8",
+    )
+    assert _load_manual_evidence(str(good)) == {
+        "VER-001": {"status": "PASS", "evidence": "Ran python main.py; window opened"},
+    }
+
+    for body in (
+        '{"VER-001": {"status": "PASS", "evidence": ""}}',
+        '{"VER-001": {"status": "MAYBE", "evidence": "looks fine"}}',
+        '["VER-001"]',
+    ):
+        bad = tmp_path / "bad.json"
+        bad.write_text(body, encoding="utf-8")
+        with pytest.raises(ValueError):
+            _load_manual_evidence(str(bad))

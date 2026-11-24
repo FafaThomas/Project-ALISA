@@ -178,14 +178,14 @@ def test_planner_prompt_groups_units_by_target_path_without_conflicting_instruct
     CodingPlanner(client).plan(_task(), specification=specification)
 
     prompt = client.prompt
-    assert "one operation for each unique target_path" in prompt
+    assert "one planned file change for each unique target_path" in prompt
     assert "One change DOES cover all units in the same-path group" in prompt
     assert "- FILE: docker-compose.yml" in prompt
     assert "UNIT: UNIT-1 — Define services" in prompt
     assert "UNIT: UNIT-2 — Configure PostgreSQL" in prompt
     assert "\\n- FILE:" not in prompt
     assert "one changed file does not cover sibling units" not in prompt
-    assert 'Use mkdir only for an explicitly required DIRECTORY target' in prompt
+    assert 'Never use "." or a directory-only path' in prompt
 
 
 
@@ -278,31 +278,193 @@ def test_planner_separates_validation_feedback_from_workspace_context():
     assert "Workspace inventory: (empty)" in prompt
 
 
-def test_planner_accepts_explicit_directory_creation_operation():
-    response = _response("VALUE = 1\n")
-    response["changes"].insert(0, {
-        "path": "frontend",
-        "change_type": "mkdir",
-        "reason": "Create the required frontend directory",
-        "content": None,
+def test_focused_espec_repair_requests_only_missing_artifact_paths(tmp_path):
+    from coding_agent.engineering_spec import (
+        EngineeringSpecification, ImplementationUnit, InterfaceContract, InterfaceField, Requirement,
+    )
+    from coding_agent.models import ChangeType, FileChange, ImplementationPlan
+
+    specification = EngineeringSpecification(
+        specification_id="spec-focused-repair",
+        task_id="task-test",
+        objective="Complete application skeleton",
+        workspace=str(tmp_path),
+        requirements=(
+            Requirement(
+                "REQ-COMPOSE",
+                "Configure PostgreSQL readiness with a pg_isready healthcheck.",
+                acceptance_criteria=("Compose defines the PostgreSQL healthcheck.",),
+            ),
+            Requirement(
+                "REQ-PROJECT",
+                "Update project.yaml with approved stack and all parent phases.",
+                acceptance_criteria=("All six parent phases are listed.",),
+            ),
+        ),
+        contracts=(
+            InterfaceContract(
+                "CON-DB", "MOD-ROOT", "Database readiness", "configuration",
+                outputs=(InterfaceField("health", "boolean"),),
+                invariants=("PostgreSQL must pass pg_isready before dependents start.",),
+            ),
+        ),
+        implementation_units=(
+            ImplementationUnit(
+                "UNIT-COMPOSE", "Configure Compose healthcheck", "docker-compose.yml",
+                satisfies=("REQ-COMPOSE",), implements=("CON-DB",),
+            ),
+            ImplementationUnit(
+                "UNIT-PROJECT", "Update project metadata", "project.yaml",
+                satisfies=("REQ-PROJECT",),
+            ),
+        ),
+    )
+    task = _task()
+    previous = ImplementationPlan(
+        task_id=task.task_id,
+        summary="Initial application plan",
+        changes=(
+            FileChange(
+                "frontend/src/App.tsx", ChangeType.CREATE,
+                "Create frontend shell", "export default function App() { return null; }\\n",
+            ),
+        ),
+    )
+    responses = [
+        {
+            "summary": "Repair Compose",
+            "changes": [{
+                "path": "docker-compose.yml",
+                "change_type": "create",
+                "reason": "Add PostgreSQL readiness healthcheck",
+                "content": "services:\\n  postgres:\\n    image: postgres:17\\n",
+            }],
+        },
+        {
+            "summary": "Repair project metadata",
+            "changes": [{
+                "path": "project.yaml",
+                "change_type": "create",
+                "reason": "Record approved project metadata",
+                "content": "goal: Burger app\\nphases: []\\n",
+            }],
+        },
+    ]
+
+    class SequencedClient:
+        def __init__(self):
+            self.prompts = []
+
+        def generate_json(self, prompt):
+            self.prompts.append(prompt)
+            return responses[len(self.prompts) - 1]
+
+    client = SequencedClient()
+    repaired = CodingPlanner(client).repair_missing_changes(
+        task,
+        context="WORKSPACE FILE INVENTORY: README.md exists",
+        specification=specification,
+        existing_plan=previous,
+        required_paths=("docker-compose.yml", "project.yaml"),
+        issues=("REQ-COMPOSE: pg_isready healthcheck is missing",),
+    )
+
+    assert [item.path for item in repaired] == ["docker-compose.yml", "project.yaml"]
+    # One model call per target file.
+    assert len(client.prompts) == 2
+    first, second = client.prompts
+    for prompt in client.prompts:
+        assert "FOCUSED FILE REPAIR" in prompt
+        assert "Return exactly one FileChange for every TARGET FILE" in prompt
+        assert "frontend/src/App.tsx" not in prompt
+    assert "TARGET FILE: docker-compose.yml" in first
+    assert "TARGET FILE: project.yaml" not in first
+    assert "TARGET FILE: project.yaml" in second
+    assert "TARGET FILE: docker-compose.yml" not in second
+    # The later call sees the file repaired earlier in the same pass.
+    assert "FILES ALREADY REPAIRED IN THIS PASS" in second
+    assert "FILE: docker-compose.yml" in second
+    compose_change = next(item for item in repaired if item.path == "docker-compose.yml")
+    assert "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" in compose_change.content
+
+
+def test_focused_espec_repair_rejects_omitted_target_path(tmp_path):
+    from coding_agent.engineering_spec import (
+        EngineeringSpecification, ImplementationUnit, Requirement,
+    )
+    from coding_agent.models import ImplementationPlan
+
+    specification = EngineeringSpecification(
+        specification_id="spec-focused-repair-strict",
+        task_id="task-test",
+        objective="Create config and docs",
+        workspace=str(tmp_path),
+        requirements=(Requirement("REQ-1", "Create configuration"),),
+        implementation_units=(
+            ImplementationUnit("UNIT-1", "Create config", "config.yml", satisfies=("REQ-1",)),
+            ImplementationUnit("UNIT-2", "Create docs", "README.md", satisfies=("REQ-1",)),
+        ),
+    )
+    client = FakeClient({
+        "summary": "Incomplete repair",
+        "changes": [{
+            "path": "config.yml",
+            "change_type": "create",
+            "reason": "Create configuration",
+            "content": "enabled: true\\n",
+        }],
     })
-    client = FakeClient(response)
 
-    plan = CodingPlanner(client).plan(_task())
+    with pytest.raises(PlanningError, match="must return exactly the requested paths"):
+        CodingPlanner(client).repair_missing_changes(
+            _task(),
+            context="",
+            specification=specification,
+            existing_plan=ImplementationPlan(
+                task_id="task-test",
+                summary="Initial",
+                changes=(),
+            ),
+            required_paths=("config.yml", "README.md"),
+            issues=("README is missing",),
+        )
 
-    assert plan.changes[0].change_type.value == "mkdir"
-    assert plan.changes[0].path == "frontend"
-    assert plan.changes[0].content is None
 
+def test_single_file_repair_keeps_the_requested_file_and_ignores_extras(tmp_path):
+    from coding_agent.engineering_spec import (
+        EngineeringSpecification, ImplementationUnit, Requirement,
+    )
+    from coding_agent.models import ImplementationPlan
 
-def test_planner_rejects_directory_creation_with_file_content():
-    response = _response("VALUE = 1\n")
-    response["changes"].insert(0, {
-        "path": "frontend",
-        "change_type": "mkdir",
-        "reason": "Create the required frontend directory",
-        "content": "not allowed",
+    specification = EngineeringSpecification(
+        specification_id="spec-focused-repair-extras",
+        task_id="task-test",
+        objective="Create config and docs",
+        workspace=str(tmp_path),
+        requirements=(Requirement("REQ-1", "Create configuration"),),
+        implementation_units=(
+            ImplementationUnit("UNIT-1", "Create config", "config.yml", satisfies=("REQ-1",)),
+            ImplementationUnit("UNIT-2", "Create docs", "README.md", satisfies=("REQ-1",)),
+        ),
+    )
+    # The model was asked only for config.yml but also re-sent README.md.
+    client = FakeClient({
+        "summary": "Repair config",
+        "changes": [
+            {"path": "config.yml", "change_type": "create",
+             "reason": "Create configuration", "content": "enabled: true\n"},
+            {"path": "README.md", "change_type": "create",
+             "reason": "Unrequested", "content": "# Docs\n"},
+        ],
     })
 
-    with pytest.raises(PlanningError, match="must use content null"):
-        CodingPlanner(FakeClient(response)).plan(_task())
+    repaired = CodingPlanner(client).repair_missing_changes(
+        _task(),
+        context="",
+        specification=specification,
+        existing_plan=ImplementationPlan(task_id="task-test", summary="Initial", changes=()),
+        required_paths=("config.yml",),
+        issues=("config.yml is missing",),
+    )
+
+    assert [item.path for item in repaired] == ["config.yml"]

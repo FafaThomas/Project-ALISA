@@ -156,6 +156,43 @@ def test_every_unit_mapped_to_one_requirement_must_be_implemented(tmp_path):
     assert any("UNIT-2 -> backend/.dockerignore" in issue for issue in report.issues)
 
 
+def test_unmapped_project_yaml_constraint_does_not_require_a_plan_file_change(tmp_path):
+    specification = EngineeringSpecification(
+        "spec-project-boundary", "task-1", "Update application configuration",
+        str(tmp_path),
+        requirements=(
+            Requirement("REQ-CONFIG", "Create application configuration"),
+            Requirement(
+                "REQ-010",
+                "Update project.yaml to mark Phase 1 complete only if defined Phase 1 acceptance criteria are met.",
+                kind=RequirementKind.CONSTRAINT,
+            ),
+        ),
+        architecture=(
+            ArchitectureModule(
+                "config", "Configuration", "Application configuration",
+                file_paths=("config/app.yml",),
+            ),
+        ),
+        implementation_units=(
+            ImplementationUnit(
+                "UNIT-CONFIG", "Application configuration", "config/app.yml",
+                satisfies=("REQ-CONFIG",),
+            ),
+        ),
+    )
+    proposed = ImplementationPlan("task-1", "Update configuration", (
+        FileChange("config/app.yml", ChangeType.CREATE, "Create config", "setting: true\\n"),
+    ))
+
+    report = PlanSpecificationValidator().validate(proposed, specification)
+
+    assert report.valid
+    assert report.required_requirements == ("REQ-CONFIG",)
+    assert report.covered_requirements == ("REQ-CONFIG",)
+    assert report.semantic_issues == ()
+
+
 def test_unmapped_functional_requirement_remains_a_hard_failure(specification):
     from dataclasses import replace
 
@@ -558,213 +595,75 @@ volumes:
     assert report.valid, report.semantic_issues
 
 
-def test_directory_only_requirement_is_covered_by_required_structural_verification(tmp_path):
-    spec = EngineeringSpecification(
-        "spec-layout", "task-1", "Create repository layout", str(tmp_path),
+GAME_SOURCE = (
+    "class Game:\n"
+    "    def __init__(self):\n"
+    "        self.head = (5, 5)\n\n"
+    "    def move_right(self):\n"
+    "        self.head = (self.head[0] + 1, self.head[1])\n"
+)
+
+
+@pytest.fixture
+def snake_specification(tmp_path):
+    from coding_agent.engineering_spec import UnitKind
+
+    return EngineeringSpecification(
+        "spec-snake", "task-snake", "Build a snake game", str(tmp_path),
         requirements=(
             Requirement(
-                "REQ-DIR",
-                "Establish frontend/, backend/, and postgres/ directories.",
-                RequirementKind.FUNCTIONAL,
-                ("The frontend, backend, and postgres directories exist.",),
+                "REQ-1", "Game logic must not import Pygame or depend on a graphical display",
+                RequirementKind.CONSTRAINT,
+                ("Game logic files do not import pygame",),
             ),
             Requirement(
-                "REQ-FILE", "Create the root .dockerignore file.",
+                "REQ-2", "Create automated tests for core game mechanics",
                 RequirementKind.FUNCTIONAL,
-                ("The root .dockerignore file exists.",),
+                ("Automated tests cover core game mechanics without opening a graphical window",),
             ),
         ),
-        architecture=(ArchitectureModule(
-            "root", "Root", "Root configuration", file_paths=(".dockerignore",)
-        ),),
-        implementation_units=(ImplementationUnit(
-            "ignore", "Root ignore rules", ".dockerignore",
-            satisfies=("REQ-FILE",),
-        ),),
-        verification=(
-            VerificationCriterion(
-                "VER-DIR", "Verify frontend, backend, and postgres directories exist.",
-                VerificationKind.STRUCTURAL,
-                command=("python", "-c", "assert True"),
-                covers=("REQ-DIR",),
-            ),
-            VerificationCriterion(
-                "VER-FILE", "Verify the root .dockerignore file exists.",
-                VerificationKind.STRUCTURAL,
-                command=("python", "-c", "assert True"),
-                covers=("REQ-FILE",),
-            ),
+        architecture=(
+            ArchitectureModule("game", "Game", "Game logic", file_paths=("game.py",)),
+            ArchitectureModule("tests", "Tests", "Automated tests", file_paths=("tests/test_game.py",)),
         ),
+        implementation_units=(
+            ImplementationUnit("game", "Game logic", "game.py", satisfies=("REQ-1",)),
+            ImplementationUnit("tests", "Tests", "tests/test_game.py", kind=UnitKind.TEST, satisfies=("REQ-2",)),
+        ),
+        verification=(VerificationCriterion("VER-1", "Tests pass", VerificationKind.BEHAVIORAL,
+                                             command=("pytest",), covers=("REQ-2",)),),
     )
 
-    directory_changes = tuple(
-        FileChange(path, ChangeType.MKDIR, "Create required repository directory")
-        for path in ("frontend", "backend", "postgres")
+
+def snake_plan(game_source, test_source):
+    return ImplementationPlan("task-snake", "Implement snake", (
+        FileChange("game.py", ChangeType.CREATE, "Game logic", game_source),
+        FileChange("tests/test_game.py", ChangeType.CREATE, "Tests", test_source),
+    ))
+
+
+def test_validator_accepts_game_logic_without_forbidden_imports(snake_specification):
+    test_source = (
+        "from game import Game\n\n"
+        "def test_move_right():\n"
+        "    game = Game()\n"
+        "    game.move_right()\n"
+        "    assert game.head == (6, 5)\n"
     )
-    complete_plan = ImplementationPlan(
-        "task-1", "Create repository layout", directory_changes + plan(".dockerignore").changes
-    )
-    report = PlanSpecificationValidator().validate(complete_plan, spec)
-
-    assert report.valid
-    assert report.covered_requirements == ("REQ-DIR", "REQ-FILE")
+    report = PlanSpecificationValidator().validate(snake_plan(GAME_SOURCE, test_source), snake_specification)
+    assert report.valid, report.issues
 
 
-def test_directory_only_requirement_without_structural_verification_is_not_covered(tmp_path):
-    spec = EngineeringSpecification(
-        "spec-layout", "task-1", "Create repository layout", str(tmp_path),
-        requirements=(Requirement(
-            "REQ-DIR",
-            "Establish frontend/, backend/, and postgres/ directories.",
-            RequirementKind.FUNCTIONAL,
-            ("The frontend, backend, and postgres directories exist.",),
-        ),),
-        architecture=(ArchitectureModule(
-            "root", "Root", "Root configuration", file_paths=(".dockerignore",)
-        ),),
-        implementation_units=(),
-        verification=(VerificationCriterion(
-            "VER-MANUAL", "Review the repository files.",
-            VerificationKind.MANUAL,
-            covers=("REQ-DIR",),
-        ),),
-    )
-
-    report = PlanSpecificationValidator().validate(
-        ImplementationPlan("task-1", "No file changes", ()), spec
-    )
-
+def test_validator_rejects_forbidden_import_in_mapped_game_logic(snake_specification):
+    game_with_pygame = "import pygame\n" + GAME_SOURCE
+    test_source = "from game import Game\n\ndef test_x():\n    assert Game().head == (5, 5)\n"
+    report = PlanSpecificationValidator().validate(snake_plan(game_with_pygame, test_source), snake_specification)
     assert not report.valid
-    assert report.missing_requirements == ("REQ-DIR",)
+    assert any("game.py imports 'pygame'" in issue for issue in report.issues)
 
 
-def test_directory_only_requirement_fails_without_mkdir_when_directories_are_missing(tmp_path):
-    spec = EngineeringSpecification(
-        "spec-layout-missing", "task-1", "Create repository layout", str(tmp_path),
-        requirements=(Requirement(
-            "REQ-DIR", "Establish frontend/ and backend/ directories.",
-            RequirementKind.FUNCTIONAL,
-            ("The frontend and backend directories exist.",),
-        ),),
-        verification=(VerificationCriterion(
-            "VER-DIR", "Verify frontend and backend directories exist.",
-            VerificationKind.STRUCTURAL,
-            command=("python", "-c", "assert True"),
-            covers=("REQ-DIR",),
-        ),),
-    )
-    report = PlanSpecificationValidator().validate(
-        ImplementationPlan("task-1", "No directory operations", ()), spec
-    )
-    assert not report.valid
-    assert report.missing_requirements == ("REQ-DIR",)
-
-
-def test_directory_only_requirement_can_reuse_existing_directories(tmp_path):
-    (tmp_path / "frontend").mkdir()
-    (tmp_path / "backend").mkdir()
-    spec = EngineeringSpecification(
-        "spec-layout-existing", "task-1", "Ensure repository layout", str(tmp_path),
-        requirements=(Requirement(
-            "REQ-DIR", "Establish frontend/ and backend/ directories.",
-            RequirementKind.FUNCTIONAL,
-            ("The frontend and backend directories exist.",),
-        ),),
-        verification=(VerificationCriterion(
-            "VER-DIR", "Verify frontend and backend directories exist.",
-            VerificationKind.STRUCTURAL,
-            command=("python", "-c", "assert True"),
-            covers=("REQ-DIR",),
-        ),),
-    )
-    report = PlanSpecificationValidator().validate(
-        ImplementationPlan("task-1", "Reuse existing directories", ()), spec
-    )
-    assert report.valid
-    assert report.covered_requirements == ("REQ-DIR",)
-
-
-def test_explicit_directory_is_not_satisfied_only_as_a_file_creation_side_effect(tmp_path):
-    spec = EngineeringSpecification(
-        "spec-dir-file", "task-1", "Create frontend ignore file and directory", str(tmp_path),
-        requirements=(Requirement(
-            "REQ-1",
-            "Create frontend/ directory and frontend/.dockerignore.",
-            RequirementKind.FUNCTIONAL,
-            ("The frontend directory and ignore file exist.",),
-        ),),
-        architecture=(ArchitectureModule(
-            "frontend", "Frontend", "Frontend setup",
-            file_paths=("frontend/.dockerignore",),
-        ),),
-        implementation_units=(ImplementationUnit(
-            "UNIT-1", "Frontend ignore", "frontend/.dockerignore",
-            satisfies=("REQ-1",),
-        ),),
-    )
-    file_only = plan("frontend/.dockerignore")
-    report = PlanSpecificationValidator().validate(file_only, spec)
-    assert not report.valid
-    assert report.missing_requirements == ("REQ-1",)
-
-    complete = ImplementationPlan(
-        "task-1", "Create frontend directory and ignore file",
-        (FileChange("frontend", ChangeType.MKDIR, "Create frontend directory"),
-         FileChange("frontend/.dockerignore", ChangeType.CREATE, "Create ignore file", "node_modules\n")),
-    )
-    assert PlanSpecificationValidator().validate(complete, spec).valid
-
-
-def test_plan_validator_reports_unimplemented_acceptance_criterion(tmp_path):
-    requirement = Requirement(
-        "REQ-1", "Users can sign in.",
-        acceptance_criteria=("Valid credentials create a session.",),
-    )
-    criterion_id = requirement.acceptance_criterion_ids[0]
-    spec = EngineeringSpecification(
-        "spec-acceptance", "task-1", "Implement sign-in", str(tmp_path),
-        requirements=(requirement,),
-        implementation_units=(ImplementationUnit(
-            "UNIT-1", "Sign-in implementation", "src/auth.py",
-            satisfies=("REQ-1",),
-            implements_acceptance_criteria=(criterion_id,),
-        ),),
-        verification=(VerificationCriterion(
-            "VER-1", "Verify valid credentials create a session.",
-            VerificationKind.BEHAVIORAL,
-            command=("pytest",),
-            covers=("REQ-1",),
-            covers_acceptance_criteria=(criterion_id,),
-        ),),
-    )
-
-    report = PlanSpecificationValidator().validate(
-        ImplementationPlan("task-1", "No implementation", ()), spec
-    )
-
-    assert not report.valid
-    assert report.missing_acceptance_criteria == (criterion_id,)
-    assert any(criterion_id in issue for issue in report.issues)
-
-
-def test_plan_validator_reports_acceptance_criterion_when_mapped_unit_is_omitted(tmp_path):
-    requirement = Requirement(
-        "REQ-1", "Users can sign in.",
-        acceptance_criteria=("Valid credentials create a session.",),
-    )
-    criterion_id = requirement.acceptance_criterion_ids[0]
-    spec = EngineeringSpecification(
-        "spec-acceptance", "task-1", "Implement sign-in", str(tmp_path),
-        requirements=(requirement,),
-        implementation_units=(ImplementationUnit(
-            "UNIT-1", "Sign-in implementation", "src/auth.py",
-            satisfies=("REQ-1",),
-            implements_acceptance_criteria=(criterion_id,),
-        ),),
-    )
-
-    report = PlanSpecificationValidator().validate(
-        ImplementationPlan("task-1", "Omit auth", ()), spec
-    )
-    assert not report.valid
-    assert report.missing_acceptance_criteria == (criterion_id,)
+def test_validator_rejects_forbidden_from_import(snake_specification):
+    game_with_pygame = "from pygame.locals import K_UP\n" + GAME_SOURCE
+    test_source = "from game import Game\n\ndef test_x():\n    assert Game().head == (5, 5)\n"
+    report = PlanSpecificationValidator().validate(snake_plan(game_with_pygame, test_source), snake_specification)
+    assert any("'pygame'" in issue for issue in report.issues)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from coding_agent.change_journal import ChangeJournal, JournalError
-from coding_agent.change_tracking import ChangeState, WorkspaceChange, content_hash, DIRECTORY_STATE_HASH
+from coding_agent.change_tracking import ChangeState, WorkspaceChange, content_hash
 from coding_agent.models import ChangeType, FileChange
 from coding_agent.workspace import Workspace, WorkspaceError
 from coding_agent.workspace_writer import (
@@ -63,7 +63,7 @@ class ChangeCoordinator:
 
     def _original_bytes(self, change: WorkspaceChange) -> bytes | None:
         """Capture original bytes before a modification or deletion."""
-        if change.operation in {ChangeType.CREATE.value, ChangeType.MKDIR.value}:
+        if change.operation == ChangeType.CREATE.value:
             return None
 
         target = self.workspace.resolve_path(change.relative_path)
@@ -174,15 +174,7 @@ class ChangeCoordinator:
             raise ValueError("Only applied changes can be verified")
 
         try:
-            if change.operation == ChangeType.MKDIR.value:
-                raw_target = self.workspace.root / change.relative_path
-                if raw_target.is_symlink():
-                    raise WorkspaceWriteError("Created directory was replaced by a symlink")
-                target = self.workspace.resolve_path(change.relative_path)
-                if not target.is_dir() or target.is_symlink():
-                    raise WorkspaceWriteError("Created directory is missing or unsafe")
-                actual_hash = DIRECTORY_STATE_HASH
-            elif change.operation == ChangeType.DELETE.value:
+            if change.operation == ChangeType.DELETE.value:
                 candidate = self.workspace.root / change.relative_path
                 resolved = candidate.resolve(strict=False)
                 resolved.relative_to(self.workspace.root.resolve())

@@ -343,3 +343,126 @@ POSTGRES_PASSWORD=change_me # Non-secret placeholder only
 
     unsafe = safe.replace("POSTGRES_PASSWORD=change_me", "POSTGRES_PASSWORD=RealPassword123")
     assert any("non-secret placeholder" in issue for issue in env_example_content_issues(unsafe))
+
+
+
+def test_deterministic_compose_repair_adds_missing_postgres_pg_isready_healthcheck():
+    from coding_agent.specification_checks import (
+        compose_content_issues,
+        ensure_postgres_pg_isready_healthcheck,
+    )
+
+    compose = """services:
+  backend:
+    build: ./backend
+  postgres:
+    image: postgres:17
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:
+"""
+    repaired = ensure_postgres_pg_isready_healthcheck(compose)
+
+    assert 'test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]' in repaired
+    assert repaired.count("healthcheck:") == 1
+    assert compose_content_issues(
+        repaired,
+        "PostgreSQL uses a persistent named volume and a readiness health check using pg_isready.",
+    ) == []
+
+
+def test_deterministic_compose_repair_replaces_invalid_existing_healthcheck_idempotently():
+    from coding_agent.specification_checks import ensure_postgres_pg_isready_healthcheck
+
+    compose = """services:
+  postgres:
+    image: postgres:17
+    healthcheck:
+      test: ["CMD", "echo", "not ready"]
+      interval: 1s
+      retries: 1
+  backend:
+    build: ./backend
+"""
+    repaired = ensure_postgres_pg_isready_healthcheck(compose)
+    repaired_again = ensure_postgres_pg_isready_healthcheck(repaired)
+
+    assert repaired_again == repaired
+    assert repaired.count("healthcheck:") == 1
+    assert "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" in repaired
+    assert "not ready" not in repaired
+
+
+def test_deterministic_compose_repair_recognizes_database_alias():
+    from coding_agent.specification_checks import ensure_postgres_pg_isready_healthcheck
+
+    repaired = ensure_postgres_pg_isready_healthcheck(
+        "services:\\n  database:\\n    image: postgres:17\\n"
+    )
+    assert "  database:\\n" in repaired
+    assert "pg_isready" in repaired
+
+
+def test_postgres_healthcheck_repair_recognizes_db_service_by_image():
+    from coding_agent.specification_checks import (
+        compose_content_issues,
+        ensure_postgres_pg_isready_healthcheck,
+    )
+
+    compose = """services:
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:
+"""
+    repaired = ensure_postgres_pg_isready_healthcheck(compose)
+    assert "  db:\n" in repaired
+    assert "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" in repaired
+    assert compose_content_issues(
+        repaired,
+        "Configure PostgreSQL with environment-driven credentials, a persistent named volume, and readiness health check using pg_isready.",
+    ) == []
+
+
+def test_postgres_healthcheck_repair_adds_missing_database_service_and_volume():
+    from coding_agent.specification_checks import (
+        compose_content_issues,
+        ensure_postgres_pg_isready_healthcheck,
+    )
+
+    compose = """services:
+  backend:
+    build: ./backend
+  frontend:
+    build: ./frontend
+"""
+    repaired = ensure_postgres_pg_isready_healthcheck(compose)
+    assert "  postgres:\n" in repaired
+    assert "image: postgres:17" in repaired
+    assert "postgres_data:/var/lib/postgresql/data" in repaired
+    assert "postgres_data:" in repaired
+    assert "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" in repaired
+    assert compose_content_issues(
+        repaired,
+        "Configure PostgreSQL with environment-driven credentials, a persistent named volume, and readiness health check using pg_isready.",
+    ) == []
+
+
+def test_postgres_healthcheck_repair_is_idempotent_for_missing_service_case():
+    from coding_agent.specification_checks import ensure_postgres_pg_isready_healthcheck
+
+    compose = "services:\n  backend:\n    build: ./backend\n"
+    repaired = ensure_postgres_pg_isready_healthcheck(compose)
+    assert ensure_postgres_pg_isready_healthcheck(repaired) == repaired

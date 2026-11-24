@@ -164,10 +164,8 @@ def test_integration_schema_constrains_top_level_and_required_verification_field
 
     verification_schema = properties["verification"]["items"]
     assert {
-        "criterion_id", "description", "kind", "required", "command", "covers",
-        "covers_acceptance_criteria",
+        "criterion_id", "description", "kind", "required", "command", "covers"
     } == set(verification_schema["required"])
-    assert "implements_acceptance_criteria" in unit_schema["required"]
     assert verification_schema["properties"]["kind"]["enum"] == [
         "static", "structural", "build", "behavioral", "runtime", "manual"
     ]
@@ -212,7 +210,7 @@ def test_generator_selects_a_distinct_schema_for_each_espec_stage():
                         "priority": "normal",
                     }]
                 }
-            if prompt.startswith("Design a minimal coherent modular architecture"):
+            if prompt.startswith("PHASE: ARCHITECTURE DESIGN"):
                 return {
                     "architecture": [{
                         "module_id": "MOD-001",
@@ -222,7 +220,7 @@ def test_generator_selects_a_distinct_schema_for_each_espec_stage():
                         "file_paths": ["README.md"],
                     }]
                 }
-            if prompt.startswith("Define explicit interfaces and data contracts"):
+            if prompt.startswith("PHASE: IMPLEMENTATION PLANNING — CONTRACTS"):
                 return {
                     "contracts": [{
                         "contract_id": "CON-001",
@@ -283,18 +281,3 @@ def test_contract_schema_allows_no_contracts_for_non_interface_scaffolding():
     generator = EngineeringSpecificationGenerator(Client())
     assert generator._parse_contracts({"contracts": []}) == []
     assert CONTRACTS_JSON_SCHEMA["properties"]["contracts"]["minItems"] == 0
-
-
-def test_integration_schema_allows_empty_acceptance_criterion_catalog_without_empty_enum():
-    requirements = [
-        Requirement("REQ-001", "Preserve the approved database", RequirementKind.CONSTRAINT),
-    ]
-    architecture = [ArchitectureModule("MOD-001", "Root", "Root", file_paths=("README.md",))]
-    schema = integration_json_schema(requirements, architecture, [])
-
-    unit_acceptance = schema["properties"]["implementation_units"]["items"]["properties"]["implements_acceptance_criteria"]
-    verification_acceptance = schema["properties"]["verification"]["items"]["properties"]["covers_acceptance_criteria"]
-    assert unit_acceptance["maxItems"] == 0
-    assert verification_acceptance["maxItems"] == 0
-    assert "enum" not in unit_acceptance["items"]
-    assert "enum" not in verification_acceptance["items"]

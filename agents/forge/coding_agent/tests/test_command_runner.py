@@ -173,3 +173,15 @@ def test_malformed_sibling_approval_does_not_block_exact_valid_approval(tmp_path
 
     assert result.succeeded
     assert result.stdout.strip() == "verified"
+
+
+def test_missing_program_reports_that_it_is_not_installed(tmp_path):
+    runner = make_runner(tmp_path)
+    command = ("alisa-definitely-missing-tool-xyz", "--version")
+
+    result = runner.run(command, approved_commands=[command])
+
+    assert result.exit_code is None
+    assert not result.timed_out
+    assert "alisa-definitely-missing-tool-xyz" in result.stderr
+    assert "not installed or is not on PATH" in result.stderr

@@ -228,12 +228,27 @@ class IntegrationStagePayload(StageModel):
         ids = [item.unit_id for item in self.implementation_units]
         if len(ids) != len(set(ids)):
             raise ValueError("unit_id values must be unique")
+        target_paths = [item.target_path.replace("\\", "/").strip() for item in self.implementation_units]
+        if len(target_paths) != len(set(target_paths)):
+            duplicates = sorted({
+                path for path in target_paths if target_paths.count(path) > 1
+            })
+            raise ValueError(
+                "each target_path must have exactly one implementation unit; "
+                f"combine work for duplicate path(s): {duplicates}"
+            )
+
         known = set(ids)
         graph = {item.unit_id: item.depends_on for item in self.implementation_units}
         for unit_id, dependencies in graph.items():
             missing = set(dependencies) - known
             if missing:
-                raise ValueError(f"unit {unit_id!r} references unknown dependencies: {sorted(missing)}")
+                raise ValueError(
+                    f"unit {unit_id!r} has unknown depends_on references: {sorted(missing)}; "
+                    "depends_on must contain implementation unit_id values only "
+                    "(for example, UNIT-001), never contract IDs; "
+                    "put contract references in implements"
+                )
             if unit_id in dependencies:
                 raise ValueError(f"unit {unit_id!r} cannot depend on itself")
         _assert_acyclic(graph, "implementation unit")

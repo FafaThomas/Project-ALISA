@@ -287,6 +287,117 @@ def _service_block(compose: str, service: str) -> str:
     return "\n".join(lines[service_line:block_end])
 
 
+
+def _ensure_named_volume(compose: str, volume_name: str) -> str:
+    section = _top_level_yaml_block(compose, "volumes")
+    if section is None:
+        suffix = "" if not compose or compose.endswith("\n") else "\n"
+        return compose + suffix + f"volumes:\n  {volume_name}:\n"
+    start, end, lines = section
+    children = _direct_mapping_children(lines, start, end)
+    if any(key == volume_name.casefold() for _, key, _ in children):
+        return compose
+    insertion = end
+    while insertion > start + 1 and not lines[insertion - 1].strip():
+        insertion -= 1
+    child_indent = min((indent for indent, _, _ in children), default=2)
+    lines[insertion:insertion] = [" " * child_indent + f"{volume_name}:"]
+    return "\n".join(lines).rstrip() + ("\n" if compose.endswith("\n") else "")
+
+
+def ensure_postgres_pg_isready_healthcheck(compose: str) -> str:
+    """Ensure a PostgreSQL service has a deterministic pg_isready healthcheck.
+
+    Existing PostgreSQL services are found by service name or official image,
+    so aliases such as ``db`` and ``database`` remain valid. If the model
+    omitted the database service entirely, add a conventional PostgreSQL 17
+    service and named data volume without replacing other Compose services.
+    """
+    section = _top_level_yaml_block(compose, "services")
+    if section is None:
+        suffix = "" if not compose or compose.endswith("\n") else "\n"
+        compose = compose + suffix + "services:\n"
+        section = _top_level_yaml_block(compose, "services")
+    assert section is not None
+    start, end, lines = section
+    details = _postgres_service_details(compose)
+
+    if details is None:
+        children = _direct_mapping_children(lines, start, end)
+        service_indent = min((indent for indent, _, _ in children), default=2)
+        service_block = [
+            " " * service_indent + "postgres:",
+            " " * (service_indent + 2) + "image: postgres:17",
+            " " * (service_indent + 2) + "environment:",
+            " " * (service_indent + 4) + "POSTGRES_DB: ${POSTGRES_DB}",
+            " " * (service_indent + 4) + "POSTGRES_USER: ${POSTGRES_USER}",
+            " " * (service_indent + 4) + "POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}",
+            " " * (service_indent + 2) + "volumes:",
+            " " * (service_indent + 4) + "- postgres_data:/var/lib/postgresql/data",
+        ]
+        insertion = end
+        while insertion > start + 1 and not lines[insertion - 1].strip():
+            insertion -= 1
+        lines[insertion:insertion] = service_block
+        compose = "\n".join(lines).rstrip() + ("\n" if compose.endswith("\n") else "")
+        compose = _ensure_named_volume(compose, "postgres_data")
+        details = _postgres_service_details(compose)
+        if details is None:
+            raise CheckFailure("Cannot add PostgreSQL service to docker-compose.yml")
+
+    service_name, _ = details
+    section = _top_level_yaml_block(compose, "services")
+    assert section is not None
+    start, end, lines = section
+    service_indent = next(
+        indent for indent, key, _ in _direct_mapping_children(lines, start, end)
+        if key == service_name.casefold()
+    )
+    service_line = next(
+        index for index in range(start + 1, end)
+        if _line_indent(lines[index]) == service_indent
+        and (_yaml_key(lines[index]) or (None,))[0] == service_name.casefold()
+    )
+    service_end = end
+    for index in range(service_line + 1, end):
+        parsed = _yaml_key(lines[index])
+        if lines[index].strip() and _line_indent(lines[index]) == service_indent and parsed is not None:
+            service_end = index
+            break
+
+    child_indent = service_indent + 2
+    healthcheck_line = None
+    for index in range(service_line + 1, service_end):
+        parsed = _yaml_key(lines[index])
+        if parsed is not None and parsed[0] == "healthcheck" and _line_indent(lines[index]) == child_indent:
+            healthcheck_line = index
+            break
+
+    healthcheck_indent = " " * child_indent
+    nested_indent = " " * (child_indent + 2)
+    replacement = [
+        f"{healthcheck_indent}healthcheck:",
+        f'{nested_indent}test: ["CMD-SHELL", "pg_isready -U $${{POSTGRES_USER}} -d $${{POSTGRES_DB}}"]',
+        f"{nested_indent}interval: 10s",
+        f"{nested_indent}timeout: 5s",
+        f"{nested_indent}retries: 5",
+    ]
+
+    if healthcheck_line is not None:
+        healthcheck_end = service_end
+        for index in range(healthcheck_line + 1, service_end):
+            if lines[index].strip() and _line_indent(lines[index]) <= child_indent:
+                healthcheck_end = index
+                break
+        repaired_lines = lines[:healthcheck_line] + replacement + lines[healthcheck_end:]
+    else:
+        insertion = service_end
+        while insertion > service_line + 1 and not lines[insertion - 1].strip():
+            insertion -= 1
+        repaired_lines = lines[:insertion] + replacement + lines[insertion:]
+
+    return "\n".join(repaired_lines).rstrip() + ("\n" if compose.endswith("\n") else "")
+
 def _declared_root_volumes(compose: str) -> set[str]:
     section = _top_level_yaml_block(compose, "volumes")
     if section is None:
@@ -346,16 +457,49 @@ def _postgres_volume_source(postgres: str) -> tuple[str | None, bool]:
     return None, False
 
 
+def _postgres_service_details(compose: str) -> tuple[str, str] | None:
+    """Find the PostgreSQL service by canonical name, image, or strong config clues."""
+    section = _top_level_yaml_block(compose, "services")
+    if section is None:
+        return None
+    start, end, lines = section
+    children = _direct_mapping_children(lines, start, end)
+    blocks: list[tuple[str, str]] = []
+    for _, name, _ in children:
+        try:
+            blocks.append((name, _service_block(compose, name)))
+        except CheckFailure:
+            continue
+
+    # An explicitly named postgres service is the most unambiguous match.
+    for name, block in blocks:
+        if name.casefold() in {"postgres", "postgresql"}:
+            return name, block
+
+    # Service aliases such as "db" are common; the image is authoritative.
+    for name, block in blocks:
+        if re.search(
+            r"""(?im)^\s*image\s*:\s*['"]?(?:docker\.io/)?(?:library/)?postgres(?:[:@/\s]|$)""",
+            block,
+        ):
+            return name, block
+
+    # Accept conventional database aliases when their configuration clearly
+    # belongs to the official PostgreSQL image.
+    for name, block in blocks:
+        if name.casefold() in {"db", "database"} and re.search(
+            r"(?im)^\s*POSTGRES_(?:DB|USER|PASSWORD)\s*:", block
+        ):
+            return name, block
+    return None
+
+
 def compose_content_issues(compose: str, requirement_text: str) -> list[str]:
     """Return semantic Compose defects using indentation-tolerant YAML structure checks."""
     issues: list[str] = []
     expected_services = [
-        service for service in ("frontend", "backend", "postgres")
-        if re.search(
-            r"\b(?:postgres|postgresql)\b" if service == "postgres" else rf"\b{service}\b",
-            requirement_text,
-            re.I,
-        )
+        service for service in ("frontend", "backend")
+        if re.search(rf"\b{service}\b", requirement_text, re.I)
     ]
     service_blocks: dict[str, str] = {}
     for service in expected_services:
@@ -364,7 +508,11 @@ def compose_content_issues(compose: str, requirement_text: str) -> list[str]:
         except CheckFailure:
             issues.append(f"Compose content is missing the {service} service")
 
-    postgres = service_blocks.get("postgres", "")
+    postgres_details = _postgres_service_details(compose)
+    postgres = postgres_details[1] if postgres_details else ""
+    if re.search(r"\b(?:postgres|postgresql)\b", requirement_text, re.I) and not postgres_details:
+        issues.append("Compose content is missing the PostgreSQL service")
+
     lowered = requirement_text.casefold()
     if re.search(r"\b(?:named\s+)?volume|persistent\s+volume|persistence", lowered):
         source, is_bind = _postgres_volume_source(postgres)
@@ -385,7 +533,7 @@ def compose_content_issues(compose: str, requirement_text: str) -> list[str]:
                 issues.append(f"PostgreSQL service is missing {variable}")
 
     if re.search(r"health\s+conditions?|service_healthy", lowered):
-        if not re.search(r"(?m)^\s*condition\s*:\s*['\"]?service_healthy['\"]?", compose):
+        if not re.search(r"""(?m)^\s*condition\s*:\s*['"]?service_healthy['"]?""", compose):
             issues.append("Service dependencies do not use service_healthy conditions")
 
     return issues
@@ -425,18 +573,35 @@ def _check_env_example(root: Path, paths: list[str]) -> list[str]:
     return [f"{target} contains {entries} documented settings and safe secret placeholders"]
 
 
-def _check_readme(root: Path, paths: list[str]) -> list[str]:
+# A README topic is required only when the specification text asks for it.
+# Each entry: (label, trigger pattern in the spec text, accepted README tokens).
+_README_TOPICS = (
+    ("prerequisites", r"prerequisite", ("prerequisite", "requirements", "docker")),
+    ("environment setup", r"environment setup", ("environment", ".env", "env.example")),
+    ("compose workflow", r"compose workflow|docker compose|docker-compose|compose up",
+     ("docker compose", "docker-compose", "compose up")),
+)
+
+
+def readme_missing_topics(readme_text: str, spec_text: str) -> list[str]:
+    """Return README topics the specification requires but the README does not cover."""
+    content = readme_text.casefold()
+    missing = []
+    for label, trigger, tokens in _README_TOPICS:
+        if re.search(trigger, spec_text, re.IGNORECASE) and not any(token in content for token in tokens):
+            missing.append(label)
+    return missing
+
+
+def _check_readme(root: Path, paths: list[str], spec_text: str = "") -> list[str]:
     target = next((p for p in paths if Path(p).name.lower() == "readme.md"), "README.md")
-    content = _read(root, target).casefold()
-    groups = {
-        "prerequisites": ("prerequisite", "requirements", "docker"),
-        "environment setup": ("environment", ".env", "env.example"),
-        "compose workflow": ("docker compose", "docker-compose", "compose up"),
-    }
-    missing = [label for label, tokens in groups.items() if not any(token in content for token in tokens)]
+    content = _read(root, target)
+    if not content.strip():
+        raise CheckFailure(f"{target} is empty")
+    missing = readme_missing_topics(content, spec_text)
     if missing:
         raise CheckFailure("README is missing required coverage: " + ", ".join(missing))
-    return ["README documents prerequisites, environment setup, and Compose workflow"]
+    return [f"{target} exists and has content"]
 
 
 def _check_project_yaml(root: Path, paths: list[str]) -> list[str]:
@@ -532,7 +697,7 @@ def run_checks(root: str | Path, payload: dict[str, Any]) -> list[str]:
     if ".env.example" in lowered:
         findings.extend(_check_env_example(workspace, paths))
     if "readme" in lowered:
-        findings.extend(_check_readme(workspace, paths))
+        findings.extend(_check_readme(workspace, paths, combined_text))
     if "project.yaml" in lowered:
         findings.extend(_check_project_yaml(workspace, paths))
     if ".dockerignore" in lowered:

@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
 import hashlib
 import json
+import re
 from pathlib import PurePosixPath
 from typing import Any, Mapping
 
@@ -62,11 +63,17 @@ def _unique(values: tuple[str, ...], field_name: str) -> None:
 
 
 def make_acceptance_criterion_id(requirement_id: str, description: str) -> str:
-    """Build a deterministic criterion ID that survives reordering and insertion."""
-    normalized = " ".join(description.casefold().split())
-    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
-    return f"{requirement_id}-AC-{digest}"
+    """Create a stable criterion identifier from its parent and wording.
 
+    The digest is based on normalized criterion text, not its position in the
+    requirement, so reordering criteria does not change their identifiers.
+    """
+    _nonempty(requirement_id, "requirement_id")
+    _nonempty(description, "acceptance criterion description")
+    normalized = " ".join(description.casefold().split())
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:10].upper()
+    safe_requirement_id = re.sub(r"[^A-Za-z0-9_-]+", "-", requirement_id.strip())
+    return f"{safe_requirement_id}-AC-{digest}"
 
 def _workspace_path(value: str, field_name: str = "path") -> None:
     _nonempty(value, field_name)

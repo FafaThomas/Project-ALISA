@@ -23,12 +23,9 @@ def content_hash(content: bytes | None) -> str | None:
     return hashlib.sha256(content).hexdigest()
 
 
-DIRECTORY_STATE_HASH = content_hash(b"coding-agent:directory:v1")
-
-
 @dataclass(frozen=True)
 class WorkspaceChange:
-    """Audit record for one intended workspace file or directory operation.
+    """Audit record for one intended workspace file operation.
 
     Hashes represent raw file bytes, not decoded or normalized text.
     A None hash represents a file that did not exist at that snapshot.
@@ -48,17 +45,15 @@ class WorkspaceChange:
             raise ValueError("change_id must not be empty")
         if not self.relative_path.strip():
             raise ValueError("relative_path must not be empty")
-        if self.operation not in {"create", "modify", "delete", "mkdir"}:
-            raise ValueError("operation must be create, modify, delete, or mkdir")
+        if self.operation not in {"create", "modify", "delete"}:
+            raise ValueError("operation must be create, modify, or delete")
         if not self.reason.strip():
             raise ValueError("reason must not be empty")
 
-        if self.operation in {"create", "mkdir"} and self.original_hash is not None:
+        if self.operation == "create" and self.original_hash is not None:
             raise ValueError("create operation must start with a missing file")
         if self.operation == "delete" and self.resulting_hash is not None:
             raise ValueError("delete operation must result in a missing file")
-        if self.operation == "mkdir" and self.resulting_hash != DIRECTORY_STATE_HASH:
-            raise ValueError("mkdir operation must use the directory state hash")
 
     def transition(self, new_state: ChangeState, *, error: str | None = None):
         """Return a new record after a valid state transition."""

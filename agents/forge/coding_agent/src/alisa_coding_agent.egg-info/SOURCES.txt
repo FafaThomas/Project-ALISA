@@ -27,6 +27,7 @@ src/coding_agent/knowledge_graph.py
 src/coding_agent/llm_client.py
 src/coding_agent/models.py
 src/coding_agent/orchestrator.py
+src/coding_agent/plan_repairs.py
 src/coding_agent/plan_specification.py
 src/coding_agent/planner.py
 src/coding_agent/recovery.py
@@ -38,6 +39,7 @@ src/coding_agent/specification_verification.py
 src/coding_agent/structural_verifier.py
 src/coding_agent/task_journal.py
 src/coding_agent/verification.py
+src/coding_agent/verification_delegation.py
 src/coding_agent/verification_planner.py
 src/coding_agent/workspace.py
 src/coding_agent/workspace_writer.py
@@ -89,6 +91,7 @@ src/coding_agent/resolvers/relative_path_import_resolver.py
 src/coding_agent/resolvers/rust_import_resolver.py
 src/coding_agent/schemas/__init__.py
 src/coding_agent/schemas/espec.py
+src/coding_agent/schemas/verification.py
 tests/test_artifact_pipeline.py
 tests/test_artifact_validator.py
 tests/test_change_journal.py
@@ -114,6 +117,7 @@ tests/test_llm_client.py
 tests/test_llm_timeout_configuration.py
 tests/test_models.py
 tests/test_orchestrator.py
+tests/test_plan_repairs.py
 tests/test_plan_specification.py
 tests/test_planner.py
 tests/test_recovery.py
@@ -121,12 +125,14 @@ tests/test_recovery_decisions.py
 tests/test_recovery_execution.py
 tests/test_repair_integration.py
 tests/test_repair_intelligence.py
+tests/test_retry.py
 tests/test_specification_checks.py
 tests/test_specification_verification.py
 tests/test_structural_verifier.py
 tests/test_structured_output.py
 tests/test_task_journal.py
 tests/test_verification.py
+tests/test_verification_delegation.py
 tests/test_verification_planner.py
 tests/test_workspace.py
 tests/test_workspace_writer.py

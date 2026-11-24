@@ -1,4 +1,4 @@
-"""Controlled file and directory operations in an authorized workspace."""
+"""Controlled file writes for an authorized Coding Agent workspace."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from coding_agent.change_tracking import (
     ChangeState,
     WorkspaceChange,
     content_hash,
-    DIRECTORY_STATE_HASH,
 )
 from coding_agent.models import ChangeType, FileChange
 from coding_agent.workspace import Workspace, WorkspaceError
@@ -71,8 +70,6 @@ class WorkspaceWriter:
         # Resolve again immediately before the operation. This reduces the
         # validation window but does not eliminate all filesystem races.
         try:
-            if proposal.change_type == ChangeType.MKDIR:
-                return self._mkdir(change, proposal, authorization)
             if proposal.change_type == ChangeType.CREATE:
                 return self._create(change, proposal, authorization)
             if proposal.change_type == ChangeType.MODIFY:
@@ -125,37 +122,6 @@ class WorkspaceWriter:
             except OSError:
                 pass
             raise
-
-
-    def _mkdir(self, change, proposal, authorization) -> WriteResult:
-        """Create exactly one approved directory; parents must already exist."""
-        target = self._resolve_create_target(proposal.path)
-        if target.exists() or target.is_symlink():
-            raise WorkspaceWriteError("Directory target already exists")
-        if not target.parent.is_dir():
-            raise WorkspaceWriteError(
-                "Directory parent must already exist; propose parent mkdir operations first"
-            )
-        if authorization.intended_result_hash != DIRECTORY_STATE_HASH:
-            raise WorkspaceWriteError("Directory authorization is invalid")
-        target.mkdir(exist_ok=False)
-        if not target.is_dir() or target.is_symlink():
-            raise WorkspaceWriteError("Created target is not a regular directory")
-        recovery = RecoveryRecord(
-            change_id=change.change_id,
-            relative_path=proposal.path,
-            operation="mkdir",
-            original_bytes=None,
-            resulting_hash=DIRECTORY_STATE_HASH,
-        )
-        return WriteResult(
-            change_id=change.change_id,
-            relative_path=proposal.path,
-            operation="mkdir",
-            applied=True,
-            resulting_hash=DIRECTORY_STATE_HASH,
-            recovery=recovery,
-        )
 
     def _create(self, change, proposal, authorization) -> WriteResult:
         target = self._resolve_create_target(proposal.path)
@@ -305,22 +271,12 @@ class WorkspaceWriter:
                     "Unsafe path in recovery record"
                 )
 
-            if recovery.operation not in {"create", "modify", "delete", "mkdir"}:
+            if recovery.operation not in {"create", "modify", "delete"}:
                 raise WorkspaceWriteError(
                     f"Unsupported recovery operation: {recovery.operation}"
                 )
 
-            if recovery.operation == "mkdir":
-                raw_target = self.workspace.root / relative
-                if raw_target.is_symlink():
-                    raise WorkspaceWriteError("Rollback target was replaced by a symlink")
-                target = self._resolve_existing(recovery.relative_path)
-                if not target.is_dir() or target.is_symlink():
-                    raise WorkspaceWriteError("Rollback target is not the created directory")
-                target.rmdir()
-                restored_hash = None
-
-            elif recovery.operation == "delete":
+            if recovery.operation == "delete":
                 if recovery.original_bytes is None:
                     raise WorkspaceWriteError(
                         "Missing original bytes for deleted file"
