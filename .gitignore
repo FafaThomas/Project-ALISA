@@ -3,6 +3,8 @@
 # ==========================================================
 
 Documentation/
+# The coding agent's Documentation division is source, not generated docs.
+!agents/forge/coding_agent/src/coding_agent/divisions/documentation/
 
 # ==========================================================
 # Python
