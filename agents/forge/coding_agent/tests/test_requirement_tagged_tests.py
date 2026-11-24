@@ -180,7 +180,7 @@ def test_model_proposed_non_python_command_is_dropped(tmp_path):
     prepared, notes = SpecificationCheckPlanner(tmp_path).prepare(spec)
 
     assert all(not item.command or item.command[0] != "grep" for item in prepared.verification)
-    assert any("dropped proposed command 'grep'" in note for note in notes)
+    assert any("program 'grep' is not part of the project's toolchain" in note for note in notes)
 
 
 def test_model_proposed_python_command_is_kept(tmp_path):

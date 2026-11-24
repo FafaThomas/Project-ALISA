@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from coding_agent.models import FileChange
+from coding_agent.specification_check_planner import command_rejection, project_toolchain
 
 
 # This script checks only the paths changed by the approved plan. Python source
@@ -129,6 +130,11 @@ class VerificationPlanner:
 
         has_tests = self._has_pytest_tests(changes)
         pytest_added = False
+        try:
+            existing_files = [item.name for item in self.root.iterdir() if item.is_file()]
+        except OSError:
+            existing_files = []
+        allowed_programs = project_toolchain([change.path for change in changes] + existing_files)
         for raw in suggested_commands:
             # Model-proposed commands are optional hints. Reject malformed
             # entries here as a second boundary, rather than allowing one bad
@@ -143,6 +149,10 @@ class VerificationPlanner:
                 not command
                 or any(not isinstance(part, str) or not part.strip() for part in command)
             ):
+                continue
+            # Same rule as for specification commands: only the project's
+            # toolchain, and never several commands joined into one argv.
+            if command_rejection(command, allowed_programs):
                 continue
             if self._is_pytest(command):
                 if has_tests and not pytest_added:

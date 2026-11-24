@@ -23,18 +23,63 @@ _HUMAN_JUDGMENT = re.compile(
 )
 
 
+def _program_name(program: str) -> str:
+    name = Path(str(program).replace("\\", "/")).name.casefold()
+    for suffix in (".exe", ".cmd", ".bat"):
+        name = name.removesuffix(suffix)
+    return name
+
+
 def _is_python_executable(program: str) -> bool:
     """True for python/py interpreters, including full paths such as sys.executable."""
-    name = Path(str(program).replace("\\", "/")).name.casefold().removesuffix(".exe")
+    name = _program_name(program)
     return name in {"python", "python3", "py"} or (
         name.startswith("python") and name.removeprefix("python").replace(".", "").isdigit()
     )
 
 
-def _is_python_toolchain(program: str) -> bool:
-    """True for a Python interpreter or pytest."""
-    name = Path(str(program).replace("\\", "/")).name.casefold().removesuffix(".exe")
-    return _is_python_executable(program) or name == "pytest"
+# Toolchains allowed when the project contains their marker file. Python is
+# always allowed: the agent's own artifact and syntax checks run on it.
+_TOOLCHAIN_MARKERS = {
+    "package.json": {"npm", "npx", "node", "pnpm", "yarn"},
+    "go.mod": {"go"},
+    "cargo.toml": {"cargo"},
+    "pom.xml": {"mvn"},
+    "build.gradle": {"gradle"},
+    "build.gradle.kts": {"gradle"},
+    "gemfile": {"bundle", "ruby", "rake"},
+    "composer.json": {"composer", "php"},
+}
+
+
+def project_toolchain(project_paths) -> set[str]:
+    """Programs a verification command may run, given the project's file paths."""
+    allowed = {"pytest"}
+    for path in project_paths:
+        name = Path(str(path).replace("\\", "/")).name.casefold()
+        allowed |= _TOOLCHAIN_MARKERS.get(name, set())
+        if name.endswith((".csproj", ".sln", ".fsproj")):
+            allowed.add("dotnet")
+    return allowed
+
+
+def command_rejection(command, allowed_programs) -> str | None:
+    """Why a model-proposed command must not run, or None when it may.
+
+    Proposed commands run unchecked, so they are limited to the project's
+    toolchain, and a command that joins several commands into one argv (a
+    second interpreter or the same program again among its arguments) is
+    rejected, since it fails for reasons unrelated to the code.
+    """
+    if not command:
+        return None
+    program = _program_name(command[0])
+    if not (_is_python_executable(command[0]) or program in allowed_programs):
+        return f"program {command[0]!r} is not part of the project's toolchain"
+    for part in command[1:]:
+        if _is_python_executable(part) or _program_name(part) == program:
+            return "it joins several commands into one"
+    return None
 
 
 def requirement_marker(requirement_id: str) -> str:
@@ -67,6 +112,13 @@ class SpecificationCheckPlanner:
             unit.target_path for unit in specification.implementation_units
             if unit.kind.value == "test" and Path(unit.target_path).suffix.lower() == ".py"
         }))
+        try:
+            existing_files = [item.name for item in self.root.iterdir() if item.is_file()]
+        except OSError:
+            existing_files = []
+        allowed_programs = project_toolchain(
+            [unit.target_path for unit in specification.implementation_units] + existing_files
+        )
         documentation_requirement_ids = {
             requirement_id
             for unit in specification.implementation_units
@@ -77,17 +129,11 @@ class SpecificationCheckPlanner:
         notes = []
         for criterion in specification.verification:
             # Commands proposed by the model run unchecked, so only the project's
-            # own toolchain may run. Other programs (grep, pydoc, anything that
-            # is not Python) are dropped; the criterion is then checked by tests,
-            # an artifact check, or a human, as usual.
-            if criterion.command and not _is_python_toolchain(criterion.command[0]):
-                notes.append(f"{criterion.criterion_id}: dropped proposed command {criterion.command[0]!r} (not the project's Python toolchain)")
-                criterion = replace(criterion, command=())
-            # A second interpreter inside the arguments means several commands were
-            # joined into one (e.g. "python main.py 2 + 3 python main.py 2 * 0").
-            # Run as one argv, it fails for reasons unrelated to the code.
-            if criterion.command and any(_is_python_executable(part) for part in criterion.command[1:]):
-                notes.append(f"{criterion.criterion_id}: dropped proposed command that joins several commands into one")
+            # own toolchain may run (see command_rejection); a dropped command's
+            # criterion is then checked by tests, an artifact check, or a human.
+            rejection = command_rejection(criterion.command, allowed_programs)
+            if rejection:
+                notes.append(f"{criterion.criterion_id}: dropped proposed command because {rejection}")
                 criterion = replace(criterion, command=())
             covered_requirement_ids = set()
             for reference in criterion.covers:
@@ -283,10 +329,12 @@ class SpecificationCheckPlanner:
                 ))
                 notes.append(f"{criterion.criterion_id}: converted to manual evidence because no safe automated check is available")
 
-        # A criterion with nothing to execute that only covers constraints is a
-        # human review item. When executable required checks exist, they decide
-        # acceptance and the review is reported without blocking. When none
-        # exist, the review is the only gate, so it stays required.
+        # A criterion with nothing to execute is a human review item when it
+        # covers only constraints, or when it asks for a judgment (readability,
+        # maintainability) about non-functional requirements. When executable
+        # required checks exist, they decide acceptance and the review is
+        # reported without blocking. When none exist, the review is the only
+        # gate, so it stays required. Functional behavior is never made optional.
         has_executable_gate = any(item.command and item.required for item in prepared)
         for index, criterion in enumerate(prepared):
             if criterion.command:
@@ -297,7 +345,18 @@ class SpecificationCheckPlanner:
                     covered.add(reference)
                 elif reference in units:
                     covered.update(units[reference].satisfies)
-            if not covered or not all(requirements[item].kind == RequirementKind.CONSTRAINT for item in covered):
+            if not covered:
+                continue
+            constraint_only = all(requirements[item].kind == RequirementKind.CONSTRAINT for item in covered)
+            judgment_review = (
+                criterion.kind == VerificationKind.MANUAL
+                and bool(_HUMAN_JUDGMENT.search(criterion.description))
+                and all(
+                    requirements[item].kind in {RequirementKind.CONSTRAINT, RequirementKind.NON_FUNCTIONAL}
+                    for item in covered
+                )
+            )
+            if not (constraint_only or judgment_review):
                 continue
             should_require = not has_executable_gate
             if criterion.required == should_require:
@@ -311,7 +370,8 @@ class SpecificationCheckPlanner:
                 ),
             )
             notes.append(
-                f"{criterion.criterion_id}: constraint-only review "
+                f"{criterion.criterion_id}: "
+                + ("constraint-only review " if constraint_only else "judgment review of non-functional requirements ")
                 + ("is required because no executable check decides acceptance"
                    if should_require else "is non-blocking; executable checks decide acceptance")
             )
