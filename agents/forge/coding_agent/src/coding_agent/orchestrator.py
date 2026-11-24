@@ -35,7 +35,7 @@ from coding_agent.retry import (
 from coding_agent.task_journal import TaskEventJournal, TaskJournalError
 from coding_agent.planner import CodingPlanner, PlanningError
 from coding_agent.command_runner import CommandRunner
-from coding_agent.verification_planner import VerificationPlanner
+from coding_agent.verification_planner import _FILE_CHECK_SCRIPT, VerificationPlanner
 from coding_agent.workspace import WorkspacePathError
 from coding_agent.verification import (
     VerificationEngine,
@@ -54,6 +54,20 @@ ManualVerificationHandler = Callable[[tuple], Mapping[str, object]]
 
 class OrchestrationError(RuntimeError):
     """Raised when the task lifecycle cannot be coordinated safely."""
+
+
+def _core_command_key(command) -> tuple:
+    """Identity of a core verification command for gating.
+
+    The file check's last argument lists the planned changes with their
+    operations. Operations can be normalized (create -> modify) after the plan
+    is approved, so the file check is identified by its program, script and
+    root, not by that list.
+    """
+    command = tuple(command)
+    if len(command) == 5 and command[1] == "-c" and command[2] == _FILE_CHECK_SCRIPT:
+        return command[:4]
+    return command
 
 
 class TaskOrchestrator:
@@ -1034,13 +1048,18 @@ class TaskOrchestrator:
         if not self.strict_specification:
             verification_planner = VerificationPlanner(self.coordinator.workspace.root)
             if self.verification_gate == "files":
-                core_commands = {verification_planner.file_check_command(plan.changes)}
+                core_built = {verification_planner.file_check_command(plan.changes)}
             else:
-                core_commands = set(verification_planner.build(plan.changes, ()))
+                core_built = set(verification_planner.build(plan.changes, ()))
+            core_commands = {_core_command_key(command) for command in core_built}
+
+        def is_core(command) -> bool:
+            return core_commands is not None and _core_command_key(command) in core_commands
+
         commands_to_run = tuple(plan.verification_commands)
         if self.verification_gate == "files":
             commands_to_run = tuple(
-                command for command in plan.verification_commands if tuple(command) in core_commands
+                command for command in plan.verification_commands if is_core(command)
             )
             skipped = len(plan.verification_commands) - len(commands_to_run)
             if skipped:
@@ -1079,10 +1098,10 @@ class TaskOrchestrator:
         gating_results = list(command_results)
         if core_commands is not None:
             gating_commands = tuple(
-                command for command in plan.verification_commands if tuple(command) in core_commands
+                command for command in plan.verification_commands if is_core(command)
             )
             gating_results = [
-                result for result in command_results if tuple(result.command) in core_commands
+                result for result in command_results if is_core(result.command)
             ]
         try:
             report: VerificationReport = self.verification_engine.evaluate(

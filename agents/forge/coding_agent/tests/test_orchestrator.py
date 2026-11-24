@@ -1725,6 +1725,19 @@ def test_files_gate_runs_only_the_file_check(tmp_path):
     assert (tmp_path / "tests" / "test_config.py").is_file()
 
 
+def test_files_gate_still_runs_the_file_check_after_operation_normalization(tmp_path):
+    # Regression: the burger repair planned CREATE for files that already existed.
+    # Normalizing them to MODIFY changed the file check's JSON argument, so the
+    # approved file check no longer matched and was skipped: "0 of 0 checks".
+    (tmp_path / "config.py").write_text("VALUE = 0\n", encoding="utf-8")
+
+    result, runner, _ = _advisory_run(tmp_path, gate="files", failing=_is_spec_pytest)
+
+    assert result.status == TaskStatus.COMPLETED, result.errors
+    assert any(note.startswith("Normalized operation for 'config.py'") for note in result.notes)
+    assert [command[1] for command, _ in runner.calls] == ["-c"]
+
+
 def test_tests_gate_fails_when_the_project_tests_fail(tmp_path):
     result, _, _ = _advisory_run(tmp_path, gate="tests", failing=_is_spec_pytest, with_test=True)
 
