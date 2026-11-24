@@ -139,11 +139,10 @@ class ChangeSet:
 
     def add(self, change: FileChange) -> FileChange:
         change.path = self.workspace.normalize(change.path)
-        if change.action == "modify" and change.path not in self._changes and \
-                self.workspace.read_text(change.path) is None:
-            change.action = "create"
-        elif change.action == "create" and self.workspace.read_text(change.path) is not None:
-            change.action = "modify"
+        if change.action != "delete":
+            # The label describes the effect on disk, however many times the file changed this run.
+            on_disk = (self.workspace.root / change.path).is_file()
+            change.action = "modify" if on_disk else "create"
         self._changes[change.path] = change
         return change
 

@@ -1,4 +1,4 @@
-"""The default "files" gate: every assigned file exists and parses.
+"""The default "files" gate: every assigned file exists, parses, and fits with the others.
 
 This gate never executes generated code. Functional testing stays with the
 user; reviewer findings are advisory and reported separately.
@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 from .models import VerificationResult, WorkItem
+from .pyinterface import import_problems
 from .workspace import ChangeSet
 
 
@@ -46,5 +47,10 @@ def verify_files(changes: ChangeSet, work_items: list[WorkItem]) -> Verification
                     "path": change.path, "check": "json-parse", "detail": f"line {exc.lineno}: {exc.msg}",
                 })
     result.checks.append("python files compile, json files parse")
+
+    # Files written by different specialists must agree on names they import from each other.
+    changed_py = [c.path for c in changes.changes() if c.action != "delete" and c.path.endswith(".py")]
+    result.problems += import_problems(changed_py, changes.current)
+    result.checks.append("imports between the project's python files resolve")
     result.passed = not result.problems
     return result

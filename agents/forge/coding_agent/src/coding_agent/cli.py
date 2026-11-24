@@ -75,6 +75,8 @@ def _summarize(report: RunReport) -> None:
         print("advisory review findings:")
         for f in report.advisory_findings:
             print(f"  - [{f.severity}] {f.file or '-'}: {f.issue} ({_name(f.role)})")
+    for warning in report.warnings:
+        print(f"warning: {warning}")
     if report.error:
         print(f"error: {report.error}")
     print(f"artifacts: {report.artifacts_dir}")

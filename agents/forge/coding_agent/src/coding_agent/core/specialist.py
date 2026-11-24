@@ -27,6 +27,7 @@ from .hooks import load_hooks
 from .llm import LLMError, ModelRouter
 from .models import CodingRequest, FileChange, Finding, RoleOutput, WorkItem
 from .prompts import SCHEMA_BY_KIND, WORK_ITEMS_SCHEMA, system_prompt
+from .pyinterface import signatures
 from .registry import RoleSpec, Tree
 from .workspace import ChangeSet, WorkspaceError
 
@@ -44,6 +45,9 @@ def _str_list(value: Any) -> list[str]:
 
 def request_md(request: CodingRequest) -> str:
     parts = [f"# Task\n{request.task.strip()}"]
+    if request.target_environment:
+        parts.append(f"## Target environment\n{request.target_environment}. The code must run there: use only "
+                     "modules and APIs available on this platform unless the task says otherwise.")
     if request.constraints:
         parts.append("## Constraints\n" + "\n".join(f"- {c}" for c in request.constraints))
     if request.acceptance_criteria:
@@ -76,6 +80,28 @@ def _finding(role: str, raw: Any) -> Finding | None:
     )
 
 
+def produced_interfaces(changes: ChangeSet, exclude: set[str], budget: int = 5000) -> str:
+    """What teammates already wrote this run: Python files with their signatures, others by name."""
+    blocks: list[str] = []
+    used = 0
+    for path in changes.paths():
+        if path in exclude:
+            continue
+        content = changes.current(path)
+        if content is None:
+            continue
+        if path.endswith(".py"):
+            block = f"- {path}\n" + "\n".join(f"    {line}" for line in signatures(content))
+        else:
+            block = f"- {path}"
+        if used + len(block) > budget:
+            blocks.append(f"- ... {len(changes.paths()) - len(blocks)} more file(s)")
+            break
+        blocks.append(block)
+        used += len(block)
+    return "\n".join(blocks) or "(none yet)"
+
+
 class Specialist:
     def __init__(
         self, role: RoleSpec, tree: Tree, router: ModelRouter, provider: ContextProvider, *,
@@ -89,6 +115,7 @@ class Specialist:
         self.prompt_budget = prompt_budget
         self.last_model = ""
         self.last_model_source = ""
+        self.last_tokens: dict[str, int] = {}
         self.hooks = load_hooks(role.folder)
 
     # ------------------------------------------------------------------ core
@@ -142,8 +169,16 @@ class Specialist:
         self.last_model, self.last_model_source = client.model, source
         think, _ = self.tree.effective_think(self.role)
         temperature, _ = self.tree.effective_temperature(self.role)
-        return client.generate_json(system_prompt(self.role, self.tree, as_lead=as_lead), prompt, schema=schema,
-                                    think=think, temperature=temperature)
+        self.last_tokens = {}
+        reply = client.generate_json(system_prompt(self.role, self.tree, as_lead=as_lead), prompt, schema=schema,
+                                     think=think, temperature=temperature)
+        self.last_tokens = dict(getattr(client, "last_usage", {}) or {})
+        used = getattr(client, "used_model", None)
+        if used and used != client.model:  # a hosted model was unavailable and a local one answered
+            self.last_model = used
+            self.last_model_source = (f"{source}; {client.model} unavailable, fell back to the "
+                                      f"{tier} default ({getattr(client, 'fallback_reason', '')[:80]})")
+        return reply
 
     def _output(self, phase: str, reply: dict[str, Any]) -> RoleOutput:
         return RoleOutput(
@@ -152,7 +187,7 @@ class Specialist:
             summary=str(reply.get("summary") or "").strip(),
             decisions=_str_list(reply.get("decisions")),
             concerns=_str_list(reply.get("concerns")),
-            model=self.last_model, model_source=self.last_model_source,
+            model=self.last_model, model_source=self.last_model_source, tokens=dict(self.last_tokens),
         )
 
     def _failed(self, phase: str, exc: Exception) -> RoleOutput:
@@ -224,12 +259,13 @@ class Specialist:
             f"{w.title} [{', '.join(w.files)}]"
             for w in all_items if w is not item
         ) or "(none)"
-        produced = "\n".join(f"- {p}" for p in changes.paths()) or "(none yet)"
+        produced = produced_interfaces(changes, exclude=set(item.files))
         sections = [
             f"## Your work item {item.id}: {item.title}\n{item.description}\n\n"
             f"Files you own: {', '.join(item.files) or 'choose sensible paths'}",
             f"## Other work items (owned by teammates)\n{others}",
-            f"## Files already produced this run\n{produced}",
+            f"## Files teammates already produced this run (use these exact names when you import them)\n"
+            f"{produced}",
             f"## Team decisions\n{board.render()}",
         ]
         query = f"{request.task}\n{item.title}\n{item.description}"

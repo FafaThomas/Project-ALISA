@@ -107,7 +107,9 @@ _KIND_INSTRUCTIONS: dict[str, str] = {
         "Turn the team's plan and design into work items. Each work item has one owner from the developers "
         "listed below and an explicit list of workspace-relative file paths it creates or modifies. Each file "
         "belongs to exactly one work item. Order items so that files others depend on come first. Keep the "
-        "number of work items small; group closely related files with the same owner."
+        "number of work items small; group closely related files with the same owner. In each description, "
+        "name the functions and classes the file must provide (with parameters) and which other files import "
+        "them, so separately written files fit together."
     ),
     "builder": (
         "Implement your assigned work item. Return the COMPLETE content of every file you create or modify "
@@ -131,7 +133,9 @@ _LEAD_INSTRUCTIONS = (
     "Each work item has one owner from the specialists listed below and an explicit list of workspace-relative "
     "file paths it creates or modifies. Each file belongs to exactly one work item. Order items so that files "
     "others depend on come first. Keep the number of work items small; group closely related files with the "
-    "same owner. Do not assign files another division already produced unless they must change."
+    "same owner. In each description, name the functions and classes the file must provide (with "
+    "parameters) and which other files import them, so separately written files fit together. Do not "
+    "assign files another division already produced unless they must change."
 )
 
 

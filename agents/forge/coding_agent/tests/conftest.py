@@ -86,13 +86,14 @@ def scripted():
 
 
 @pytest.fixture(autouse=True)
-def isolated_model_env(monkeypatch):
-    """Keep the developer's .env and shell model settings out of the tests."""
+def isolated_model_env(monkeypatch, tmp_path):
+    """Keep the developer's .env, shell model settings and quota usage file out of the tests."""
     import os
 
     from coding_agent.core import env
 
     monkeypatch.setattr(env, "find_project_env", lambda: None)
     for name in list(os.environ):
-        if name.startswith("FORGE_") or "OLLAMA" in name:
+        if name.startswith(("FORGE_", "GEMINI_")) or "OLLAMA" in name:
             monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GEMINI_USAGE_FILE", str(tmp_path / "gemini_usage.json"))

@@ -75,6 +75,9 @@ class CodingRequest:
     max_team_size: int | None = None
     # Run reviewer findings back through developers once (opt-in).
     fix_review_findings: bool = False
+    # Where the generated code must run, e.g. "Windows 11, Python 3.12". Empty: the
+    # CODING_AGENT_TARGET_ENVIRONMENT setting, else the machine running the agent.
+    target_environment: str = ""
 
     def __post_init__(self) -> None:
         if not self.task or not self.task.strip():
@@ -91,7 +94,7 @@ class CodingRequest:
             raise ValueError("request body must be a JSON object")
         allowed = {
             "task", "workspace", "constraints", "acceptance_criteria", "mode",
-            "requested_roles", "max_team_size", "fix_review_findings",
+            "requested_roles", "max_team_size", "fix_review_findings", "target_environment",
         }
         unknown = set(payload) - allowed
         if unknown:
@@ -115,6 +118,7 @@ class CodingRequest:
             requested_roles=str_list("requested_roles"),
             max_team_size=max_team,
             fix_review_findings=bool(payload.get("fix_review_findings", False)),
+            target_environment=str(payload.get("target_environment") or ""),
         )
 
 
@@ -162,6 +166,8 @@ class RoleOutput:
     # e.g. "unit.md (development/database_developer)" or ".env CODING_AGENT_OLLAMA_MODEL".
     model: str = ""
     model_source: str = ""
+    # Tokens used by this output's model call(s): prompt, output, thinking (if any), total.
+    tokens: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -189,6 +195,8 @@ class RunReport:
     verification: VerificationResult | None = None
     advisory_findings: list[Finding] = field(default_factory=list)
     error: str = ""
+    # Specialists that failed while the run as a whole could continue.
+    warnings: list[str] = field(default_factory=list)
     artifacts_dir: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -232,6 +240,7 @@ def role_output_from_dict(data: dict[str, Any]) -> RoleOutput:
         findings=[finding_from_dict(f) for f in data.get("findings") or []],
         error=str(data.get("error", "")), model=str(data.get("model", "")),
         model_source=str(data.get("model_source", "")),
+        tokens={str(k): int(v) for k, v in (data.get("tokens") or {}).items()},
     )
 
 

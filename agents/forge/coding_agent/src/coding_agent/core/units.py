@@ -34,6 +34,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import platform
+import sys
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -78,6 +80,18 @@ class Executor(Protocol):
                label: str = ...) -> RoleOutput: ...
 
 
+def default_target_environment() -> str:
+    """CODING_AGENT_TARGET_ENVIRONMENT, else the OS and Python of the machine running the agent."""
+    from .env import env_value, load_local_env
+
+    load_local_env()
+    configured = env_value("CODING_AGENT_TARGET_ENVIRONMENT")
+    if configured:
+        return configured
+    system = {"Windows": "Windows", "Darwin": "macOS", "Linux": "Linux"}.get(platform.system(), platform.system())
+    return f"{system} {platform.release()}, Python {sys.version_info.major}.{sys.version_info.minor}"
+
+
 # ------------------------------------------------------------------- session
 @dataclass
 class Session:
@@ -113,6 +127,8 @@ class Session:
         unit: UnitSpec, emit: Emit | None = None, run_id: str | None = None,
     ) -> "Session":
         workspace = Workspace(request.workspace)
+        if not request.target_environment:
+            request.target_environment = default_target_environment()
         run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         return cls(
             request=request, invocation=invocation, router=router, tree=tree, workspace=workspace,
@@ -500,8 +516,18 @@ def finish(session: Session, report: RunReport, *, remember: bool) -> RunReport:
     report.advisory_findings = session.findings
     passed = report.verification is None or report.verification.passed
 
-    if session.builders_ran and not report.changes:
-        report.error = "The team produced no file changes."
+    failed = [o for o in session.outputs if o.error]
+    report.warnings = [f"{o.role} ({o.phase}) failed: {o.error[:200]}" for o in failed]
+    # A specialist whose model failed may still deliver (e.g. a reviewer's deterministic tools).
+    empty = [o for o in failed if not (o.changes or o.findings or o.work_items or o.decisions)]
+    everyone_failed = bool(session.outputs) and len(empty) == len(session.outputs)
+
+    if everyone_failed and not report.changes:
+        report.error = f"Every specialist failed ({len(failed)}): " + "; ".join(
+            f"{o.role}: {o.error[:120]}" for o in failed)
+    elif session.builders_ran and not report.changes:
+        report.error = "The team produced no file changes." + (
+            f" Failures: {'; '.join(w for w in report.warnings)[:400]}" if report.warnings else "")
     elif not passed:
         report.error = "Generated files did not pass the files gate after repairs; nothing was written."
     elif report.changes and session.request.mode == "apply":

@@ -60,6 +60,79 @@ class LLMError(RuntimeError):
     """An LLM request failed or returned something unusable."""
 
 
+class ProviderUnavailableError(LLMError):
+    """A hosted provider could not be reached or is temporarily failing."""
+
+
+class RateLimitError(ProviderUnavailableError):
+    """A hosted provider refused the call for quota or rate-limit reasons."""
+
+
+REMOTE_PREFIXES = ("gemini:",)
+
+
+def split_provider(model: str) -> tuple[str, str]:
+    """('gemini', 'gemini-2.5-flash') for 'gemini:gemini-2.5-flash'; ('ollama', model) otherwise."""
+    for prefix in REMOTE_PREFIXES + ("ollama:",):
+        if model.startswith(prefix):
+            return prefix[:-1], model[len(prefix):]
+    return "ollama", model
+
+
+def resolve_alias(model: str) -> tuple[str, str]:
+    """'gemini:@reasoning' -> ('gemini:<FORGE_GEMINI_REASONING_MODEL>', '.env FORGE_GEMINI_REASONING_MODEL')."""
+    provider, name = split_provider(model)
+    if not name.startswith("@"):
+        return model, ""
+    var = f"FORGE_{provider.upper()}_{name[1:].upper()}_MODEL"
+    load_local_env()
+    value = env_value(var)
+    if not value:
+        raise LLMError(f"{model} refers to {var}, which is not set in .env")
+    return f"{provider}:{value}", f".env {var}"
+
+
+def default_client_factory(model: str) -> "LLMClient":
+    provider, name = split_provider(model)
+    if provider == "gemini":
+        from .gemini import GeminiClient
+
+        return GeminiClient(name)
+    return OllamaClient(name)
+
+
+class FallbackClient:
+    """A hosted model that falls back to a local one when the provider is unavailable.
+
+    After each call, ``used_model`` and ``fallback_reason`` say what actually answered.
+    """
+
+    def __init__(self, primary: "LLMClient", fallback: Callable[[], "LLMClient"], label: str) -> None:
+        self.primary = primary
+        self._fallback = fallback
+        self.model = label
+        self.used_model = label
+        self.fallback_reason = ""
+        self.last_usage: dict[str, int] = {}
+
+    def unload(self) -> bool:
+        return self.primary.unload()
+
+    def generate_json(self, system: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
+        self.used_model, self.fallback_reason = self.model, ""
+        try:
+            reply = self.primary.generate_json(system, prompt, **kwargs)
+            self.last_usage = dict(getattr(self.primary, "last_usage", {}) or {})
+            return reply
+        except ProviderUnavailableError as exc:
+            local = self._fallback()
+            LOGGER.warning("%s unavailable (%s); falling back to %s", self.model, exc, local.model)
+            self.used_model, self.fallback_reason = local.model, str(exc)[:200]
+            reply = local.generate_json(system, prompt, **kwargs)
+            self.last_usage = dict(getattr(local, "last_usage", {}) or {})
+            return reply
+
+
 class LLMClient(Protocol):
     model: str
 
@@ -114,6 +187,7 @@ class OllamaClient:
         self.timeout = float(timeout or _positive_env("CODING_AGENT_LLM_TIMEOUT", DEFAULT_TIMEOUT_SECONDS, float))
         self.num_predict = int(num_predict or _positive_env("CODING_AGENT_OLLAMA_NUM_PREDICT", DEFAULT_NUM_PREDICT, int))
         self.num_ctx = int(num_ctx or _positive_env("CODING_AGENT_OLLAMA_NUM_CTX", DEFAULT_NUM_CTX, int))
+        self.last_usage: dict[str, int] = {}
 
     def _post(self, path: str, payload: dict[str, Any], timeout: float):
         request = Request(
@@ -190,6 +264,8 @@ class OllamaClient:
         )
         if not final:
             raise LLMError("Ollama closed the stream without a final record")
+        prompt_tokens, output_tokens = int(final.get("prompt_eval_count") or 0), int(final.get("eval_count") or 0)
+        self.last_usage = {"prompt": prompt_tokens, "output": output_tokens, "total": prompt_tokens + output_tokens}
         if final.get("done_reason") == "length":
             raise LLMError(
                 f"Output hit CODING_AGENT_OLLAMA_NUM_PREDICT ({self.num_predict}) before the JSON finished"
@@ -243,7 +319,7 @@ class ModelRouter:
         self._env_source: dict[str, str] = {}
         self._active: LLMClient | None = None
         self.unload_on_switch = unload_on_switch
-        self.client_factory = client_factory or (lambda model: OllamaClient(model))
+        self.client_factory = client_factory or default_client_factory
 
     @classmethod
     def single(cls, client: LLMClient) -> "ModelRouter":
@@ -258,6 +334,21 @@ class ModelRouter:
             client = self._by_model[model] = self.client_factory(model)
         return client
 
+    def _tier_client(self, tier: str) -> LLMClient:
+        """The tier's default (local) client, without touching unload bookkeeping."""
+        client = self._clients.get(tier)
+        if client is None:
+            load_local_env()
+            env_name = next((n for n in _TIER_ENV.get(tier, ()) if env_value(n)), None)
+            if env_name is None:
+                raise LLMError(
+                    f"No model configured for the {tier} tier. Set {_TIER_ENV[tier][0]} or OLLAMA_MODEL, "
+                    "or give the unit a model in .env or its unit.md."
+                )
+            client = self._clients[tier] = self._model_client(env_value(env_name))  # type: ignore[arg-type]
+            self._env_source[tier] = f".env {env_name}"
+        return client
+
     def resolve(
         self, tier: str, model: str | None = None, source: str | None = None,
     ) -> tuple[LLMClient, str]:
@@ -266,19 +357,20 @@ class ModelRouter:
         if self._fixed is not None:
             return self._fixed, "fixed client"
         if model:
-            client, source = self._model_client(model), source or "unit model"
+            source = source or "unit model"
+            model, alias_source = resolve_alias(model)
+            if alias_source:
+                source = f"{source} -> {alias_source}"
+            if split_provider(model)[0] != "ollama":
+                key = f"{model}|fallback:{tier}"
+                client = self._by_model.get(key)
+                if client is None:
+                    client = self._by_model[key] = FallbackClient(
+                        self._model_client(model), lambda: self._tier_client(tier), model)
+            else:
+                client = self._model_client(model)
         else:
-            client = self._clients.get(tier)
-            if client is None:
-                load_local_env()
-                env_name = next((n for n in _TIER_ENV.get(tier, ()) if env_value(n)), None)
-                if env_name is None:
-                    raise LLMError(
-                        f"No model configured for the {tier} tier. Set {_TIER_ENV[tier][0]} or OLLAMA_MODEL, "
-                        "or give the unit a model in .env or its unit.md."
-                    )
-                client = self._clients[tier] = self._model_client(env_value(env_name))  # type: ignore[arg-type]
-                self._env_source[tier] = f".env {env_name}"
+            client = self._tier_client(tier)
             source = self._env_source.get(tier, f"{tier} tier client")
         if (
             self.unload_on_switch
