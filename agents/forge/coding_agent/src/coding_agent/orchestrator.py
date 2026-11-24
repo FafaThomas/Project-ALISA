@@ -33,7 +33,7 @@ from coding_agent.retry import (
     build_recovery_context,
 )
 from coding_agent.task_journal import TaskEventJournal, TaskJournalError
-from coding_agent.planner import CodingPlanner
+from coding_agent.planner import CodingPlanner, PlanningError
 from coding_agent.command_runner import CommandRunner
 from coding_agent.verification_planner import VerificationPlanner
 from coding_agent.workspace import WorkspacePathError
@@ -511,7 +511,9 @@ class TaskOrchestrator:
             planning_corrections_used = 0
             try:
                 plan = self._planner_plan(task, planner_context, specification)
-            except ValueError as exc:
+            # The real planner wraps content validation errors in PlanningError;
+            # test planners may raise ValueError directly. Both get the correction.
+            except (ValueError, PlanningError) as exc:
                 # A syntactically invalid generated Python file is a repairable
                 # model-output defect, not a reason to consume an entire user-
                 # approved task retry. Ask the planner to regenerate with the
@@ -523,6 +525,7 @@ class TaskOrchestrator:
                     or (
                         "not syntactically valid" not in message
                         and "never defines or imports" not in message
+                        and "at import time" not in message
                     )
                     or self.max_planning_corrections < 1
                 ):

@@ -8,6 +8,7 @@ import builtins
 import json
 import logging
 import re
+from pathlib import PurePosixPath
 
 from coding_agent.llm_client import OllamaClient
 from coding_agent.engineering_spec import EngineeringSpecification
@@ -72,6 +73,106 @@ def _normalize_model_file_content(path: str, content: str | None) -> str | None:
             )
 
     return content
+
+
+def _is_main_guard(node: ast.AST) -> bool:
+    """True for `if __name__ == "__main__":` (either operand order)."""
+    if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
+        return False
+    operands = [node.test.left, *node.test.comparators]
+    has_name = any(isinstance(item, ast.Name) and item.id == "__name__" for item in operands)
+    has_main = any(isinstance(item, ast.Constant) and item.value == "__main__" for item in operands)
+    return has_name and has_main
+
+
+def import_time_argument_read(source: str) -> int | None:
+    """Line where a module reads command-line arguments while being imported, or None.
+
+    Reading sys.argv or calling parse_args() at module level (outside functions
+    and outside the `if __name__ == "__main__":` guard) runs on import, so a
+    test that imports the module gets pytest's own arguments.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    argv_aliases = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "sys"
+        for alias in node.names
+        if alias.name == "argv"
+    }
+
+    def visit(node: ast.AST) -> int | None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) or _is_main_guard(node):
+            return None
+        reads_argv = (
+            isinstance(node, ast.Attribute) and node.attr == "argv"
+            and isinstance(node.value, ast.Name) and node.value.id == "sys"
+        ) or (isinstance(node, ast.Name) and node.id in argv_aliases and isinstance(node.ctx, ast.Load))
+        parses_args = (
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "parse_args" and not node.args
+        )
+        if reads_argv or parses_args:
+            return getattr(node, "lineno", None)
+        for child in ast.iter_child_nodes(node):
+            line = visit(child)
+            if line is not None:
+                return line
+        return None
+
+    for statement in tree.body:
+        line = visit(statement)
+        if line is not None:
+            return line
+    return None
+
+
+def _is_test_path(path: str) -> bool:
+    name = PurePosixPath(path.replace("\\", "/")).name
+    return name.startswith("test_") and name.endswith(".py") or name.endswith("_test.py")
+
+
+def import_time_argument_issue(changes) -> str | None:
+    """Describe a planned module that a planned test imports but that reads arguments on import."""
+    python_changes = [
+        change for change in changes
+        if change.content and change.path.casefold().endswith(".py")
+    ]
+    imported_by_tests: dict[str, str] = {}
+    for change in python_changes:
+        if not _is_test_path(change.path):
+            continue
+        try:
+            tree = ast.parse(change.content)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported_by_tests.setdefault(alias.name, change.path)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                imported_by_tests.setdefault(node.module, change.path)
+    for change in python_changes:
+        if _is_test_path(change.path):
+            continue
+        parts = PurePosixPath(change.path.replace("\\", "/")).with_suffix("").parts
+        module_names = {".".join(parts), parts[-1]}
+        importer = next((imported_by_tests[name] for name in module_names if name in imported_by_tests), None)
+        if importer is None:
+            continue
+        line = import_time_argument_read(change.content)
+        if line is not None:
+            return (
+                f"Generated Python content for {change.path!r} reads command-line arguments at import "
+                f"time (line {line}), and {importer} imports it, so the tests crash on pytest's own "
+                "arguments. Move argument parsing into a main() function called under "
+                "if __name__ == \"__main__\":. The plan was rejected before approval; no workspace "
+                "files were changed."
+            )
+    return None
 
 
 _MODULE_DUNDERS = {
@@ -596,6 +697,7 @@ ARTIFACT CONTENT CONTRACT:
 - If a constraint is explicitly mapped to implementation units, those units are mandatory and must be implemented.
 - A prohibition ("must not import X", "without Y") governs every file you write that it applies to. Before returning JSON, scan each such file's import lines and confirm none of the forbidden modules appear. Put any dependency the prohibited module would provide in a file the prohibition does not cover.
 - Tests must check observable behavior with concrete expected values that follow from the requirement. Never write a placeholder test such as asserting that a function returned a truthy value.
+- Entry-point scripts must keep argument parsing and other side effects inside a function called under if __name__ == "__main__":, so tests can import them without running the program.
 - Behavior of a runnable program (its output, exit status, and error messages) must be tested by running the program in a test, for example with subprocess.run([sys.executable, "main.py", "2", "+", "3"], capture_output=True, text=True, cwd=<project root>) and asserting on stdout and returncode. Import sys and subprocess in that test file.
 - For Python tests, tag each test function with a pytest marker for every requirement it verifies. The marker is the requirement ID in lowercase with non-alphanumeric characters replaced by "_" (REQ-002 becomes @pytest.mark.req_002). The verifier runs `python -m pytest -m req_002` for each requirement, so a requirement with no tagged test fails verification. Every test file that uses pytest.mark must start with `import pytest`.
 - A test may call only methods and functions that your planned code defines. Before returning JSON, list every method a test calls on a planned class and confirm each one is defined in the planned files. Remove or rename any call you did not define.
@@ -673,6 +775,9 @@ RULES:
                 )
                 for item in raw_changes
             )
+            import_time_issue = import_time_argument_issue(changes)
+            if import_time_issue:
+                raise ValueError(import_time_issue)
 
             raw_commands = response.get("verification_commands", [])
             if not isinstance(raw_commands, list):

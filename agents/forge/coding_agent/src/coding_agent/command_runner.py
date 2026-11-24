@@ -206,6 +206,11 @@ class CommandRunner:
         # VerificationPlanner when it selects pytest.
         command_environment = os.environ.copy()
         command_environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        # Keep pytest from writing .pytest_cache into the workspace for any
+        # command, including model-proposed ones; rollback cannot remove it.
+        existing_addopts = command_environment.get("PYTEST_ADDOPTS", "")
+        if "no:cacheprovider" not in existing_addopts:
+            command_environment["PYTEST_ADDOPTS"] = f"{existing_addopts} -p no:cacheprovider".strip()
 
         try:
             process = subprocess.Popen(
