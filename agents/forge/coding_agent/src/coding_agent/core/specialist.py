@@ -1,6 +1,10 @@
-"""Runs one specialist: its folder definition, a model tier and a context provider.
+"""Runs one specialist: its folder definition, a model and a context provider.
 
-A specialist's optional ``tools.py`` can define:
+A specialist folder can change how it works in two places:
+
+- ``agent.py``: a ``UnitAgent`` subclass overriding ``extra_context``,
+  ``review`` and ``after_output`` (see core/hooks.py);
+- ``tools.py`` (older, function-based) can define:
 
 - ``extra_context(query: str, workspace_root: Path) -> str | None``
       added to the specialist's context before the model is called
@@ -19,10 +23,11 @@ from typing import Any
 
 from .blackboard import Blackboard
 from .context.base import ContextProvider
+from .hooks import load_hooks
 from .llm import LLMError, ModelRouter
 from .models import CodingRequest, FileChange, Finding, RoleOutput, WorkItem
 from .prompts import SCHEMA_BY_KIND, WORK_ITEMS_SCHEMA, system_prompt
-from .registry import ROLES, DivisionSpec, RoleSpec
+from .registry import RoleSpec, Tree
 from .workspace import ChangeSet, WorkspaceError
 
 LOGGER = logging.getLogger(__name__)
@@ -46,10 +51,16 @@ def request_md(request: CodingRequest) -> str:
     return "\n\n".join(parts)
 
 
-def division_md(division: DivisionSpec | None) -> str:
-    if division is None:
-        return ""
-    return f"## Your division: {division.name}\n{division.mission}"
+def unit_context_md(role: RoleSpec, tree: Tree) -> str:
+    """The division (and team) a specialist works in, from their unit.md briefs."""
+    parts = []
+    division = tree.division_of(role)
+    if division is not None and division.mission:
+        parts.append(f"## Your division: {division.name}\n{division.mission}")
+    team = tree.team_of(role)
+    if team is not None:
+        parts.append(f"## Your team: {team.name}\n{team.responsibility}")
+    return "\n\n".join(parts)
 
 
 def _finding(role: str, raw: Any) -> Finding | None:
@@ -67,16 +78,18 @@ def _finding(role: str, raw: Any) -> Finding | None:
 
 class Specialist:
     def __init__(
-        self, role: RoleSpec, router: ModelRouter, provider: ContextProvider, *,
-        workspace_root: Path | None = None, division: DivisionSpec | None = None,
-        prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+        self, role: RoleSpec, tree: Tree, router: ModelRouter, provider: ContextProvider, *,
+        workspace_root: Path | None = None, prompt_budget: int = DEFAULT_PROMPT_BUDGET,
     ) -> None:
         self.role = role
+        self.tree = tree
         self.router = router
         self.provider = provider
         self.workspace_root = workspace_root
-        self.division = division
         self.prompt_budget = prompt_budget
+        self.last_model = ""
+        self.last_model_source = ""
+        self.hooks = load_hooks(role.folder)
 
     # ------------------------------------------------------------------ core
     def _tool(self, name: str):
@@ -87,13 +100,30 @@ class Specialist:
             return None
         return getattr(tools, name, None) if tools else None
 
+    def _extensions(self, name: str) -> list:
+        """The unit's own implementations of ``name``: tools.py function, then agent.py hook."""
+        found = [self._tool(name)]
+        if self.hooks is not None:
+            found.append(getattr(self.hooks, name, None))
+        return [f for f in found if f is not None]
+
+    def _after(self, output: RoleOutput, action: str) -> RoleOutput:
+        if self.hooks is None:
+            return output
+        try:
+            result = self.hooks.after_output(output, action)
+        except Exception as exc:
+            LOGGER.warning("after_output for %s failed: %s", self.role.id, exc)
+            output.concerns.append(f"after_output hook failed: {exc}")
+            return output
+        return result if isinstance(result, RoleOutput) else output
+
     def _ask(
         self, request: CodingRequest, sections: list[str], *, query: str,
         focus_files: list[str] | None = None, reader=None, as_lead: bool = False,
     ) -> dict[str, Any]:
-        fixed_parts = [request_md(request), division_md(self.division), *sections]
-        extra = self._tool("extra_context")
-        if extra and self.workspace_root is not None:
+        fixed_parts = [request_md(request), unit_context_md(self.role, self.tree), *sections]
+        for extra in self._extensions("extra_context") if self.workspace_root is not None else []:
             try:
                 text = extra(query, self.workspace_root)
             except Exception as exc:
@@ -106,8 +136,11 @@ class Specialist:
         budget = max(2000, self.prompt_budget - len(fixed))
         prompt = f"{fixed}\n\n## Context ({bundle.strategy})\n{bundle.render(budget)}"
         schema = WORK_ITEMS_SCHEMA if as_lead else SCHEMA_BY_KIND[self.role.kind]
-        client = self.router.client_for("planning" if as_lead else self.role.tier)
-        return client.generate_json(system_prompt(self.role, as_lead=as_lead), prompt, schema=schema)
+        model, declared_by = self.tree.effective_model(self.role)
+        tier = "planning" if as_lead else self.role.tier
+        client, source = self.router.resolve(tier, model, declared_by)
+        self.last_model, self.last_model_source = client.model, source
+        return client.generate_json(system_prompt(self.role, self.tree, as_lead=as_lead), prompt, schema=schema)
 
     def _output(self, phase: str, reply: dict[str, Any]) -> RoleOutput:
         return RoleOutput(
@@ -116,13 +149,15 @@ class Specialist:
             summary=str(reply.get("summary") or "").strip(),
             decisions=_str_list(reply.get("decisions")),
             concerns=_str_list(reply.get("concerns")),
+            model=self.last_model, model_source=self.last_model_source,
         )
 
     def _failed(self, phase: str, exc: Exception) -> RoleOutput:
-        return RoleOutput(role=self.role.id, phase=phase, summary="", error=str(exc))
+        return RoleOutput(role=self.role.id, phase=phase, summary="", error=str(exc),
+                          model=self.last_model, model_source=self.last_model_source)
 
     # --------------------------------------------------------------- actions
-    def consult(self, request: CodingRequest, board: Blackboard) -> RoleOutput:
+    def _do_consult(self, request: CodingRequest, board: Blackboard) -> RoleOutput:
         """Notes and decisions, no files (analysts, planners, designers)."""
         phase = "plan" if self.role.kind == "coordinator" else self.role.phase
         try:
@@ -136,7 +171,7 @@ class Specialist:
                     output.decisions.append(f"{raw.get('title')}: {', '.join(_str_list(raw.get('files')))}")
         return output
 
-    def coordinate(
+    def _do_coordinate(
         self, request: CodingRequest, board: Blackboard, builders: list[RoleSpec], changes: ChangeSet,
     ) -> RoleOutput:
         """Division lead: split the division's work into owned work items."""
@@ -176,13 +211,13 @@ class Specialist:
             ))
         return output
 
-    def build(
+    def _do_build(
         self, request: CodingRequest, board: Blackboard, item: WorkItem, all_items: list[WorkItem],
         changes: ChangeSet,
     ) -> RoleOutput:
         """Write the files for one work item."""
         others = "\n".join(
-            f"- {w.id} ({ROLES[w.owner_role].name if w.owner_role in ROLES else w.owner_role}): "
+            f"- {w.id} ({self.tree.by_id[w.owner_role].name if w.owner_role in self.tree.by_id else w.owner_role}): "
             f"{w.title} [{', '.join(w.files)}]"
             for w in all_items if w is not item
         ) or "(none)"
@@ -201,7 +236,7 @@ class Specialist:
             return self._failed("build", exc)
         return self._collect_files("build", reply, changes, item.id)
 
-    def repair(
+    def _do_repair(
         self, request: CodingRequest, problems: list[dict[str, str]], changes: ChangeSet, board: Blackboard,
     ) -> RoleOutput:
         listing = "\n".join(f"- {p['path']} [{p['check']}]: {p['detail']}" for p in problems)
@@ -213,7 +248,7 @@ class Specialist:
             return self._failed("repair", exc)
         return self._collect_files("repair", reply, changes, "repair")
 
-    def review(
+    def _do_review(
         self, request: CodingRequest, board: Blackboard, subject: list[tuple[str, str, str]], *,
         limit: int = 6000, label: str = "Proposed changes",
     ) -> RoleOutput:
@@ -231,10 +266,10 @@ class Specialist:
             output, raw_findings = self._failed("review", exc), []
         output.findings.extend(f for f in (_finding(self.role.id, r) for r in raw_findings) if f)
 
-        tool = self._tool("review")
-        if tool:
+        files = [(path, content) for action, path, content in subject if action != "delete"]
+        for tool in self._extensions("review"):
             try:
-                tool_findings = tool([(path, content) for action, path, content in subject if action != "delete"])
+                tool_findings = tool(files)
             except Exception as exc:
                 LOGGER.warning("review tool for %s failed: %s", self.role.id, exc)
                 tool_findings = []
@@ -261,6 +296,26 @@ class Specialist:
                 continue
             output.changes.append(change)
         return output
+
+    # ------------------------------------------------- public actions (+ hooks)
+    def consult(self, request: CodingRequest, board: Blackboard) -> RoleOutput:
+        return self._after(self._do_consult(request, board), "consult")
+
+    def coordinate(self, request: CodingRequest, board: Blackboard, builders: list[RoleSpec],
+                   changes: ChangeSet) -> RoleOutput:
+        return self._after(self._do_coordinate(request, board, builders, changes), "coordinate")
+
+    def build(self, request: CodingRequest, board: Blackboard, item: WorkItem, all_items: list[WorkItem],
+              changes: ChangeSet) -> RoleOutput:
+        return self._after(self._do_build(request, board, item, all_items, changes), "build")
+
+    def repair(self, request: CodingRequest, problems: list[dict[str, str]], changes: ChangeSet,
+               board: Blackboard) -> RoleOutput:
+        return self._after(self._do_repair(request, problems, changes, board), "repair")
+
+    def review(self, request: CodingRequest, board: Blackboard, subject: list[tuple[str, str, str]], *,
+               limit: int = 6000, label: str = "Proposed changes") -> RoleOutput:
+        return self._after(self._do_review(request, board, subject, limit=limit, label=label), "review")
 
 
 _FENCE = re.compile(r"^```[\w.+-]*\n(.*)\n```\s*$", re.DOTALL)

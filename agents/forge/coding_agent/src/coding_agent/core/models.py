@@ -158,6 +158,10 @@ class RoleOutput:
     changes: list[FileChange] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     error: str = ""
+    # The model that produced this output and where the choice came from,
+    # e.g. "unit.md (development/database_developer)" or ".env CODING_AGENT_OLLAMA_MODEL".
+    model: str = ""
+    model_source: str = ""
 
 
 @dataclass
@@ -189,3 +193,47 @@ class RunReport:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# ------------------------------------------------------------ wire format
+# Units deployed as their own services exchange these objects as JSON.
+def work_item_from_dict(data: dict[str, Any]) -> WorkItem:
+    return WorkItem(
+        id=str(data.get("id", "")), title=str(data.get("title", "")), owner_role=str(data.get("owner_role", "")),
+        description=str(data.get("description", "")), files=[str(f) for f in data.get("files") or []],
+    )
+
+
+def file_change_from_dict(data: dict[str, Any]) -> FileChange:
+    action = data.get("action", "create")
+    return FileChange(
+        path=str(data.get("path", "")), action=action if action in ("create", "modify", "delete") else "create",
+        content=str(data.get("content", "")), author_role=str(data.get("author_role", "")),
+        work_item_id=str(data.get("work_item_id", "")),
+    )
+
+
+def finding_from_dict(data: dict[str, Any]) -> Finding:
+    severity = data.get("severity", "info")
+    return Finding(
+        role=str(data.get("role", "")),
+        severity=severity if severity in ("info", "low", "medium", "high", "critical") else "info",
+        issue=str(data.get("issue", "")), file=str(data.get("file", "")), suggestion=str(data.get("suggestion", "")),
+    )
+
+
+def role_output_from_dict(data: dict[str, Any]) -> RoleOutput:
+    return RoleOutput(
+        role=str(data.get("role", "")), phase=str(data.get("phase", "")), summary=str(data.get("summary", "")),
+        decisions=[str(d) for d in data.get("decisions") or []],
+        concerns=[str(c) for c in data.get("concerns") or []],
+        work_items=[work_item_from_dict(w) for w in data.get("work_items") or []],
+        changes=[file_change_from_dict(c) for c in data.get("changes") or []],
+        findings=[finding_from_dict(f) for f in data.get("findings") or []],
+        error=str(data.get("error", "")), model=str(data.get("model", "")),
+        model_source=str(data.get("model_source", "")),
+    )
+
+
+def request_to_dict(request: CodingRequest) -> dict[str, Any]:
+    return asdict(request)

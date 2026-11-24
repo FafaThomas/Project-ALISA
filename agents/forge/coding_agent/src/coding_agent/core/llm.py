@@ -15,6 +15,9 @@ Environment (read from the process or the ALISA project ``.env``):
 - ``CODING_AGENT_LLM_TIMEOUT``         seconds per request (default 300)
 - ``CODING_AGENT_OLLAMA_NUM_PREDICT``  output token cap (default 8192)
 - ``CODING_AGENT_OLLAMA_NUM_CTX``      context window (default 16384)
+
+A unit can name its own model with ``model:`` in its ``unit.md``; units under
+it inherit that model. Units with no declared model use the tier settings above.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -213,29 +216,66 @@ def parse_json_object(text: str) -> dict[str, Any]:
 
 
 class ModelRouter:
-    """Hands out one client per tier and unloads models when the tier changes."""
+    """Picks the client for each call.
 
-    def __init__(self, clients: Mapping[str, LLMClient] | None = None, *, unload_on_switch: bool = True) -> None:
-        self._clients: dict[str, LLMClient] = dict(clients or {})
+    A unit's model comes from its ``unit.md`` (or the nearest unit above it
+    that declares one). Units without one use their tier's model from the
+    ``.env``. ``resolve`` returns the client together with a note saying where
+    the choice came from, which reports record for every specialist.
+
+    Switching to a different model unloads the previous one, to keep VRAM
+    free on single-GPU hosts.
+    """
+
+    def __init__(
+        self,
+        clients: Mapping[str, LLMClient] | None = None,
+        *,
+        unload_on_switch: bool = True,
+        client_factory: Callable[[str], LLMClient] | None = None,
+    ) -> None:
+        self._clients: dict[str, LLMClient] = dict(clients or {})   # by tier
+        self._by_model: dict[str, LLMClient] = {c.model: c for c in self._clients.values()}
+        self._fixed: LLMClient | None = None
+        self._env_source: dict[str, str] = {}
         self._active: LLMClient | None = None
         self.unload_on_switch = unload_on_switch
+        self.client_factory = client_factory or (lambda model: OllamaClient(model))
 
     @classmethod
     def single(cls, client: LLMClient) -> "ModelRouter":
-        """Serve every tier with one client (tests, hosted models)."""
-        return cls({tier: client for tier in _TIER_ENV}, unload_on_switch=False)
+        """Serve every unit with one client (tests, or one hosted model)."""
+        router = cls(unload_on_switch=False)
+        router._fixed = client
+        return router
 
-    def client_for(self, tier: str) -> LLMClient:
-        client = self._clients.get(tier)
+    def _model_client(self, model: str) -> LLMClient:
+        client = self._by_model.get(model)
         if client is None:
-            model = model_for_tier(tier)
-            if not model:
-                raise LLMError(
-                    f"No model configured for the {tier} tier. Set {_TIER_ENV[tier][0]} or OLLAMA_MODEL."
-                )
-            reuse = next((c for c in self._clients.values() if c.model == model), None)
-            client = reuse or OllamaClient(model)
-            self._clients[tier] = client
+            client = self._by_model[model] = self.client_factory(model)
+        return client
+
+    def resolve(
+        self, tier: str, model: str | None = None, declared_by: str | None = None,
+    ) -> tuple[LLMClient, str]:
+        """(client, source). ``model`` is a unit's declared model, if any."""
+        if self._fixed is not None:
+            return self._fixed, "fixed client"
+        if model:
+            client, source = self._model_client(model), f"unit.md ({declared_by or 'unit'})"
+        else:
+            client = self._clients.get(tier)
+            if client is None:
+                load_local_env()
+                env_name = next((n for n in _TIER_ENV.get(tier, ()) if os.getenv(n)), None)
+                if env_name is None:
+                    raise LLMError(
+                        f"No model configured for the {tier} tier. Set {_TIER_ENV[tier][0]} or OLLAMA_MODEL, "
+                        "or declare a model in the unit's unit.md."
+                    )
+                client = self._clients[tier] = self._model_client(os.environ[env_name])
+                self._env_source[tier] = f".env {env_name}"
+            source = self._env_source.get(tier, f"{tier} tier client")
         if (
             self.unload_on_switch
             and self._active is not None
@@ -244,4 +284,7 @@ class ModelRouter:
         ):
             self._active.unload()
         self._active = client
-        return client
+        return client, source
+
+    def client_for(self, tier: str) -> LLMClient:
+        return self.resolve(tier)[0]

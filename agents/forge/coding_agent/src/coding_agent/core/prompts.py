@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .registry import DIVISIONS, RoleSpec
+from .registry import RoleSpec, Tree
 
 _STR = {"type": "string"}
 _STR_LIST = {"type": "array", "items": _STR}
@@ -135,12 +135,19 @@ _LEAD_INSTRUCTIONS = (
 )
 
 
-def system_prompt(role: RoleSpec, *, as_lead: bool = False) -> str:
-    division = DIVISIONS[role.division]
+def system_prompt(role: RoleSpec, tree: Tree, *, as_lead: bool = False) -> str:
+    division = tree.division_of(role)
+    team = tree.team_of(role)
+    where = f"{division.name} division" if division else "coding agent"
+    if team is not None:
+        where += f", {team.name} team"
+    lead_note = _LEAD_INSTRUCTIONS
+    if as_lead and role.is_team:
+        lead_note = lead_note.replace("lead of your division", "lead of your team")
     parts = [
         f"You are the {role.name} on ALISA Forge's software engineering team "
-        f"({division.name} division). Your responsibility: {role.responsibility}.",
-        _LEAD_INSTRUCTIONS if as_lead else _KIND_INSTRUCTIONS[role.kind],
+        f"({where}). Your responsibility: {role.responsibility}.",
+        lead_note if as_lead else _KIND_INSTRUCTIONS[role.kind],
     ]
     if role.instructions:
         parts.append(role.instructions)

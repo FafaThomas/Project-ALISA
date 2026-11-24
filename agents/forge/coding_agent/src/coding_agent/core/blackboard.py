@@ -11,21 +11,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from .models import RoleOutput
-from .registry import get_role
+from .registry import Tree, default_tree
 
 
 class Blackboard:
-    def __init__(self, budget_chars: int = 7000) -> None:
+    def __init__(self, budget_chars: int = 7000, tree: Tree | None = None) -> None:
         self.entries: list[RoleOutput] = []
         self.budget_chars = budget_chars
+        self.tree = tree or default_tree()
 
     def post(self, output: RoleOutput) -> None:
         self.entries.append(output)
 
-    @staticmethod
-    def _entry_md(output: RoleOutput, full: bool) -> str:
-        role = get_role(output.role)
-        lines = [f"#### {role.name} ({output.phase})", output.summary or "(no summary)"]
+    def _entry_md(self, output: RoleOutput, full: bool) -> str:
+        unit = self.tree.by_id.get(output.role)
+        lines = [f"#### {unit.name if unit else output.role} ({output.phase})", output.summary or "(no summary)"]
         if output.error:
             lines.append(f"_Error: {output.error}_")
         if full:

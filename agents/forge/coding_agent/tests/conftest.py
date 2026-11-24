@@ -5,9 +5,9 @@ from typing import Any, Callable
 
 import pytest
 
-from coding_agent.core.registry import ROSTER
+from coding_agent.core.registry import default_tree
 
-_NAME_TO_ID = {role.name: role.id for role in ROSTER}
+_NAME_TO_ID = {unit.name: unit.id for unit in default_tree().specialists}
 _ROLE_RE = re.compile(r"^You are the (.+?) (?:on|of) ALISA Forge")
 
 Handler = Callable[[str, dict | None], dict]
@@ -28,7 +28,8 @@ class ScriptedLLM:
 
     def generate_json(self, system: str, prompt: str, *, schema=None) -> dict:
         match = _ROLE_RE.match(system)
-        role = _NAME_TO_ID.get(match.group(1), match.group(1)) if match else "unknown"
+        # Units outside the packaged tree (test trees) map "Postgres Developer" -> "postgres_developer".
+        role = (_NAME_TO_ID.get(match.group(1)) or match.group(1).lower().replace(" ", "_")) if match else "unknown"
         self.calls.append({"role": role, "system": system, "prompt": prompt, "schema": schema})
         handler = self.handlers.get(role)
         if handler is None:

@@ -1,20 +1,23 @@
-"""HTTP API for invoking the coding agent directly (standard library only).
+"""HTTP service for any unit (standard library only).
 
-Endpoints
----------
-GET  /health                         liveness
-GET  /units                          the hierarchy: agent > divisions > specialists
-POST /runs                           run the whole agent
-POST /divisions/<division_id>/runs   run one division
-POST /specialists/<specialist>/runs  run one specialist
-GET  /runs/<job_id>                  job status, progress events and (when done) report
+Serve the whole agent, or any single unit on its own port:
 
-POST bodies are CodingRequest payloads. POSTs return 202 with a job id; add
-?wait=true to block until the run finishes.
+    coding-agent serve --allow-root D:\\work                                     # the agent
+    coding-agent serve --allow-root D:\\work --unit development/database_developer --port 8801
 
-API invocations never get the Forge RAG pipeline. Workspaces must sit under
-one of the configured allowed roots, and a bearer token is required when
-``token`` is set (or ``CODING_AGENT_API_TOKEN`` is in the environment).
+Endpoints (relative to the served unit):
+
+    GET  /health                 liveness
+    GET  /units                  the served unit and everything under it
+    POST /runs                   run the served unit (body: CodingRequest payload)
+    POST /units/<path>/runs      run a unit under the served one
+    GET  /runs/<job_id>          job status, progress events and (when done) report
+    POST /invoke                 internal: a parent unit delegating one step to this unit
+
+POST /runs returns 202 with a job id; add ?wait=true to block. Workspaces
+must sit under an allowed root. A bearer token is required when ``token`` is
+set (or ``CODING_AGENT_API_TOKEN`` is in the environment); parents send the
+same variable when calling remote units.
 """
 
 from __future__ import annotations
@@ -23,20 +26,23 @@ import hmac
 import json
 import logging
 import os
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .agent import CodingAgent
+from .agent import CodingAgent, Unit
 from .core.models import CodingRequest, InvocationContext, InvocationSource
+from .core.units import handle_invoke
 
 LOGGER = logging.getLogger(__name__)
-MAX_BODY_BYTES = 256_000
+MAX_BODY_BYTES = 8_000_000  # /invoke carries proposed file contents
 
 
 @dataclass
@@ -52,35 +58,72 @@ class Job:
                 "report": self.report, "error": self.error}
 
 
+def missing_requirements(unit: Unit) -> list[str]:
+    """Packages listed in requirements.txt files under ``unit`` that are not installed."""
+    missing = []
+    for spec in unit.tree.subtree(unit.spec):
+        path = spec.requirements_file
+        if path is None:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].strip()
+            match = re.match(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*", line)
+            if not match:
+                continue
+            try:
+                metadata.version(match.group(0))
+            except metadata.PackageNotFoundError:
+                missing.append(f"{match.group(0)} ({path})")
+    return missing
+
+
 class CodingAgentService:
     """Transport-independent request handling; the HTTP layer is a thin shell."""
 
-    def __init__(self, agent: CodingAgent, allowed_roots: list[str | Path], token: str | None = None) -> None:
+    def __init__(
+        self, agent: CodingAgent, allowed_roots: list[str | Path], token: str | None = None,
+        unit: str | None = None,
+    ) -> None:
         if not allowed_roots:
             raise ValueError("at least one allowed workspace root is required")
         self.agent = agent
+        self.served = agent.unit(unit)
         self.allowed_roots = [Path(r).expanduser().resolve() for r in allowed_roots]
         self.token = token if token is not None else os.getenv("CODING_AGENT_API_TOKEN") or None
         self.jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
 
+    # ---------------------------------------------------------------- checks
     def authorized(self, header: str | None) -> bool:
         if not self.token:
             return True
         expected = f"Bearer {self.token}"
         return bool(header) and hmac.compare_digest(header.encode(), expected.encode())
 
+    def _check_workspace(self, workspace: str) -> str:
+        resolved = Path(workspace).expanduser().resolve()
+        if not any(resolved == root or root in resolved.parents for root in self.allowed_roots):
+            raise PermissionError("workspace is outside the allowed roots")
+        return str(resolved)
+
     def validate(self, payload: dict[str, Any]) -> CodingRequest:
         request = CodingRequest.from_payload(payload)
-        workspace = Path(request.workspace).expanduser().resolve()
-        if not any(workspace == root or root in workspace.parents for root in self.allowed_roots):
-            raise PermissionError("workspace is outside the allowed roots")
-        request.workspace = str(workspace)
+        request.workspace = self._check_workspace(request.workspace)
         return request
 
-    def start(self, request: CodingRequest, *, level: str = "agent", unit_id: str | None = None,
-              wait: bool = False) -> Job:
-        unit = self.agent.unit(level, unit_id)  # validates before a job exists
+    def resolve(self, ref: str | None) -> Unit:
+        """A unit within the served subtree (by path relative to the tree, or id)."""
+        if not ref:
+            return self.served
+        unit = self.agent.unit(ref)
+        base = self.served.path
+        if base and unit.path != base and not unit.path.startswith(base + "/"):
+            raise LookupError(f"unit {ref!r} is not served here")
+        return unit
+
+    # ------------------------------------------------------------------ runs
+    def start(self, request: CodingRequest, *, unit: str | None = None, wait: bool = False) -> Job:
+        target = self.resolve(unit)
         job = Job(id=uuid.uuid4().hex[:12])
         with self._lock:
             self.jobs[job.id] = job
@@ -93,7 +136,7 @@ class CodingAgentService:
             job.status = "running"
             invocation = InvocationContext(source=InvocationSource.API, caller_id="api")
             try:
-                report = unit.run(request, invocation, emit=emit)
+                report = target.run(request, invocation, emit=emit)
                 job.report = report.to_dict()
                 job.status = report.status
                 job.error = report.error
@@ -110,13 +153,24 @@ class CodingAgentService:
         with self._lock:
             return self.jobs.get(job_id)
 
+    def invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("body must be a JSON object")
+        unit = self.resolve(str(payload.get("unit") or self.served.path))
+        request = payload.get("request")
+        if not isinstance(request, dict):
+            raise ValueError("request must be an object")
+        request["workspace"] = self._check_workspace(str(request.get("workspace", "")))
+        payload["unit"] = unit.path
+        return handle_invoke(self.agent.tree, self.agent.router, payload)
+
     def units(self) -> dict[str, Any]:
-        return self.agent.describe()
+        return self.served.describe()
 
 
 def make_handler(service: CodingAgentService) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        server_version = "ALISA-CodingAgent/0.2"
+        server_version = "ALISA-CodingAgent/0.4"
 
         def log_message(self, fmt: str, *args: Any) -> None:
             LOGGER.info("api %s - " + fmt, self.address_string(), *args)
@@ -135,10 +189,16 @@ def make_handler(service: CodingAgentService) -> type[BaseHTTPRequestHandler]:
             self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return False
 
+        def _body(self) -> Any:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > MAX_BODY_BYTES:
+                raise ValueError("missing or oversized body")
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path.rstrip("/")
             if path == "/health":
-                return self._send(HTTPStatus.OK, {"status": "ok"})
+                return self._send(HTTPStatus.OK, {"status": "ok", "unit": service.served.path or service.served.unit_id})
             if not self._guard():
                 return
             if path == "/units":
@@ -153,38 +213,42 @@ def make_handler(service: CodingAgentService) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             parts = [p for p in parsed.path.split("/") if p]
-            if parts == ["runs"]:
-                level, unit_id = "agent", None
-            elif len(parts) == 3 and parts[0] in ("divisions", "specialists") and parts[2] == "runs":
-                level, unit_id = parts[0][:-1], parts[1]
+            if parts == ["invoke"]:
+                kind, unit = "invoke", None
+            elif parts == ["runs"]:
+                kind, unit = "run", None
+            elif len(parts) >= 3 and parts[0] == "units" and parts[-1] == "runs":
+                kind, unit = "run", "/".join(parts[1:-1])
             else:
                 return self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
             if not self._guard():
                 return
-            length = int(self.headers.get("Content-Length") or 0)
-            if length <= 0 or length > MAX_BODY_BYTES:
-                return self._send(HTTPStatus.BAD_REQUEST, {"error": "missing or oversized body"})
             try:
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                payload = self._body()
+                if kind == "invoke":
+                    return self._send(HTTPStatus.OK, service.invoke(payload))
                 request = service.validate(payload)
+                wait = parse_qs(parsed.query).get("wait", ["false"])[0].lower() in ("1", "true", "yes")
+                job = service.start(request, unit=unit, wait=wait)
             except PermissionError as exc:
                 return self._send(HTTPStatus.FORBIDDEN, {"error": str(exc)})
+            except LookupError as exc:
+                return self._send(HTTPStatus.NOT_FOUND, {"error": str(exc).strip("'\"")})
             except (ValueError, UnicodeDecodeError) as exc:
-                return self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-            wait = parse_qs(parsed.query).get("wait", ["false"])[0].lower() in ("1", "true", "yes")
-            try:
-                job = service.start(request, level=level, unit_id=unit_id, wait=wait)
-            except ValueError as exc:
-                return self._send(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+                status = HTTPStatus.NOT_FOUND if "unknown unit" in str(exc) else HTTPStatus.BAD_REQUEST
+                return self._send(status, {"error": str(exc)})
             self._send(HTTPStatus.OK if wait else HTTPStatus.ACCEPTED, job.snapshot())
 
     return Handler
 
 
 def serve(service: CodingAgentService, host: str = "127.0.0.1", port: int = 8765) -> None:
+    missing = missing_requirements(service.served)
+    for item in missing:
+        print(f"warning: requirement not installed: {item}")
     server = ThreadingHTTPServer((host, port), make_handler(service))
-    LOGGER.info("coding agent API listening on http://%s:%d", host, port)
-    print(f"coding agent API listening on http://{host}:{port}")
+    label = service.served.path or service.served.unit_id
+    print(f"serving unit '{label}' on http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

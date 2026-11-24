@@ -132,7 +132,7 @@ def test_reviewer_tools_still_run_when_the_model_is_down(tmp_path):
 def test_unknown_units_are_rejected():
     agent, _ = agent_with()
     for call in (lambda: agent.division("marketing"), lambda: agent.specialist("wizard"),
-                 lambda: agent.unit("platoon", "x")):
+                 lambda: agent.unit("development/wizard"), lambda: agent.division("python_developer")):
         try:
             call()
         except ValueError:
@@ -174,9 +174,8 @@ def test_forge_context_is_inherited_by_a_division_run(tmp_path):
 
 
 def test_describe_lists_the_hierarchy():
-    tree = CodingAgent.describe()
+    tree = CodingAgent().describe()
     assert tree["level"] == "agent" and tree["lead"] == "engineering_director"
-    security = next(d for d in tree["divisions"] if d["id"] == "security")
+    security = next(d for d in tree["units"] if d["id"] == "security")
     assert security["lead"] == "security_architect"
-    assert {s["id"] for s in security["specialists"] if s["has_tools"]} == {"code_security_auditor",
-                                                                          "dependency_auditor"}
+    assert {s["id"] for s in security["units"] if s["has_tools"]} == {"code_security_auditor", "dependency_auditor"}

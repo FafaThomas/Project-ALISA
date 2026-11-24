@@ -39,11 +39,11 @@ def call(url, method="GET", body=None, token="s3cret"):
 
 def test_health_is_public_and_the_rest_needs_a_token(server):
     base, _ = server
-    assert call(f"{base}/health", token=None) == (200, {"status": "ok"})
+    assert call(f"{base}/health", token=None) == (200, {"status": "ok", "unit": "coding_agent"})
     assert call(f"{base}/units", token=None)[0] == 401
     status, tree = call(f"{base}/units")
-    assert status == 200 and len(tree["divisions"]) == 7
-    assert sum(len(d["specialists"]) for d in tree["divisions"]) == 51
+    assert status == 200 and len(tree["units"]) == 7
+    assert sum(len(d["units"]) for d in tree["units"]) == 51
 
 
 def test_run_over_http(server):
@@ -77,19 +77,19 @@ def test_workspace_must_be_under_an_allowed_root(server, tmp_path):
 
 def test_division_and_specialist_routes(server):
     base, root = server
-    status, job = call(f"{base}/divisions/development/runs?wait=true", "POST", {
+    status, job = call(f"{base}/units/development/runs?wait=true", "POST", {
         "task": "Build a calculator CLI in Python", "workspace": str(root / "div"),
     })
     assert status == 200 and job["status"] == "completed", job
     assert (job["report"]["unit_level"], job["report"]["unit_id"]) == ("division", "development")
 
-    status, job = call(f"{base}/specialists/engineering_director/runs?wait=true", "POST", {
+    status, job = call(f"{base}/units/leadership/engineering_director/runs?wait=true", "POST", {
         "task": "Build a calculator CLI in Python", "workspace": str(root / "spec"),
     })
     assert status == 200 and job["report"]["unit_id"] == "engineering_director"
 
-    assert call(f"{base}/divisions/marketing/runs", "POST", {"task": "x", "workspace": str(root)})[0] == 404
-    assert call(f"{base}/specialists/wizard/runs", "POST", {"task": "x", "workspace": str(root)})[0] == 404
+    assert call(f"{base}/units/marketing/runs", "POST", {"task": "x", "workspace": str(root)})[0] == 404
+    assert call(f"{base}/units/development/wizard/runs", "POST", {"task": "x", "workspace": str(root)})[0] == 404
 
 
 def test_bad_payloads_are_rejected(server):

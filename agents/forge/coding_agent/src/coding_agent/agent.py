@@ -1,72 +1,131 @@
-"""The coding agent and its addressable units.
+"""The coding agent's addressable units.
 
-    Faction     The Forge (wraps this agent; not part of this package)
-    Agent       CodingAgent                    lead: Engineering Director
-    Division    CodingAgent.division("security")   lead: from division.md
-    Specialist  CodingAgent.specialist("dependency_auditor")
+    Faction         The Forge (wraps this agent; not part of this package)
+    Agent           the coding agent                         lead: Engineering Director
+    Division        e.g. "security"                          lead: from its unit.md
+    Specialist      e.g. "development/database_developer"
+    Sub-specialist  e.g. "development/database_developer/postgres_developer"
 
-Each unit offers ``run(request, invocation, emit=None) -> RunReport``:
+Any unit can be used on its own, without going through the agent:
 
-    agent = CodingAgent()
-    agent.run(request, invocation)                                  # the whole agent
-    agent.division("security").run(request, invocation)             # one division
-    agent.specialist("dependency_auditor").run(request, invocation) # one specialist
+    from coding_agent import load_unit
+    load_unit("development/database_developer").run(request, invocation)
+    load_unit("dependency_auditor").run(request, invocation)    # ids work too
+    load_unit().run(request, invocation)                        # the whole agent
+
+and any unit can be served as its own HTTP service (``coding-agent serve --unit``).
 
 Callers and context: the ALISA UI, the HTTP API and the CLI use Markdown
-context. Only ``CodingAgent.forge_invocation(retriever)`` (the Forge) brings
-the Forge RAG pipeline, and it is inherited by every unit below.
+context. Only ``forge_invocation(retriever)`` (the Forge) brings the Forge RAG
+pipeline, and it is inherited by every unit below the one called.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .core.context import build_context_provider
 from .core.llm import LLMClient, ModelRouter
 from .core.models import (
     CodingRequest, InvocationContext, InvocationSource, KnowledgeRetriever, RoleOutput, RunReport,
 )
-from .core.registry import AGENT, DIVISIONS, ROLES, REGISTRY, DivisionSpec, RoleSpec
+from .core.registry import Tree, UnitSpec, default_tree
 from .core.selection import Team, TeamAssembler
-from .core.units import Emit, Level, Session, finish, group_by_division, memory_entry, run_phases, write_report
+from .core.units import Emit, Session, finish, group_by_division, memory_entry, run_phases, write_report
 from .core.workspace import Workspace
 
 LOGGER = logging.getLogger(__name__)
-Select = Callable[[Session, list[str]], Team]
 
 
-class _UnitBase:
-    level: Level
-    unit_id: str
-    name: str
+class Runtime:
+    """What every unit shares: the tree, the model router and run settings."""
 
-    def __init__(self, owner: "CodingAgent") -> None:
-        self.owner = owner
+    def __init__(
+        self,
+        router: ModelRouter | None = None,
+        *,
+        tree: Tree | None = None,
+        use_director_llm: bool = True,
+        max_repairs: int = 2,
+        remember_runs: bool = True,
+    ) -> None:
+        self.router = router or ModelRouter()
+        self.tree = tree or default_tree()
+        self.use_director_llm = use_director_llm
+        self.max_repairs = max_repairs
+        self.remember_runs = remember_runs
 
-    def _select(self, session: Session, files: list[str]) -> Team:  # pragma: no cover - abstract
-        raise NotImplementedError
 
-    def _attach(self) -> bool:
-        return False
+class Unit:
+    """One node of the tree. ``run`` makes it the unit that was called."""
 
+    def __init__(self, spec: UnitSpec, runtime: Runtime) -> None:
+        self.spec = spec
+        self.runtime = runtime
+
+    @property
+    def level(self) -> str:
+        return self.spec.level
+
+    @property
+    def unit_id(self) -> str:
+        return self.spec.id
+
+    @property
+    def path(self) -> str:
+        return self.spec.path
+
+    @property
+    def name(self) -> str:
+        return self.spec.name
+
+    @property
+    def tree(self) -> Tree:
+        return self.runtime.tree
+
+    @property
+    def router(self) -> ModelRouter:
+        return self.runtime.router
+
+    def describe(self) -> dict[str, Any]:
+        return self.tree.describe(self.spec)
+
+    # ------------------------------------------------------------ selection
+    def _select(self, session: Session, files: list[str]) -> Team:
+        tree, spec = self.tree, self.spec
+        if spec.level == "agent":
+            return TeamAssembler(self.router, tree=tree, use_director_llm=self.runtime.use_director_llm).assemble(
+                session.request, files)
+        if spec.level == "division":
+            return TeamAssembler(None, tree=tree, use_director_llm=False).for_division(session.request, files, spec)
+        if spec.id == tree.root.lead:
+            # Calling the agent's lead alone answers "who would you put on this?"
+            team = TeamAssembler(self.router, tree=tree, use_director_llm=self.runtime.use_director_llm).assemble(
+                session.request, files)
+            session.record(RoleOutput(role=spec.id, phase="plan", summary=team.rationale,
+                                      decisions=[f"Team: {', '.join(team.ids)}"]), spec.division)
+            return Team([spec], team.rationale, [], team.scores)
+        return Team([spec], f"{spec.name} called directly.")
+
+    # ------------------------------------------------------------------ run
     def run(self, request: CodingRequest, invocation: InvocationContext, *, emit: Emit | None = None) -> RunReport:
-        owner = self.owner
-        session = Session.open(request, invocation, owner.router, level=self.level, unit_id=self.unit_id, emit=emit)
+        session = Session.open(request, invocation, self.router, self.tree, unit=self.spec, emit=emit)
         report = session.new_report()
         session.emit({"event": "run_started", "run_id": session.run_id, "level": self.level, "unit": self.unit_id,
-                      "context_strategy": session.provider.strategy, "source": invocation.source.value})
+                      "path": self.path, "context_strategy": session.provider.strategy,
+                      "source": invocation.source.value})
         try:
             team = self._select(session, session.workspace.list_files())
             report.team = team.ids
             report.team_rationale = team.rationale
-            groups = group_by_division(team.roles, attach=self._attach())
+            groups = group_by_division(self.tree, team.roles, attach=self.level == "agent")
             session.emit({"event": "team", "team": team.ids, "rationale": team.rationale,
                           "divisions": {d: [r.id for r in members] for d, members in groups.items()},
                           "standby": [r.id for r in team.standby]})
-            run_phases(session, groups, owner.max_repairs)
-            finish(session, report, remember=owner.remember_runs)
+            run_phases(session, groups, self.runtime.max_repairs)
+            finish(session, report, remember=self.runtime.remember_runs)
         except Exception as exc:  # report every failure instead of raising to callers
             LOGGER.exception("%s %s run %s failed", self.level, self.unit_id, session.run_id)
             report.status = "failed"
@@ -78,73 +137,30 @@ class _UnitBase:
         return report
 
 
-class DivisionUnit(_UnitBase):
-    level: Level = "division"
-
-    def __init__(self, owner: "CodingAgent", spec: DivisionSpec) -> None:
-        super().__init__(owner)
-        self.spec = spec
-        self.unit_id = spec.id
-        self.name = spec.name
-
-    @property
-    def lead(self) -> RoleSpec:
-        return ROLES[self.spec.lead]
-
-    @property
-    def members(self) -> list[RoleSpec]:
-        return [ROLES[m] for m in self.spec.members]
-
-    def _select(self, session: Session, files: list[str]) -> Team:
-        return TeamAssembler(None, use_director_llm=False).for_division(session.request, files, self.spec)
+# Names kept for readability at call sites.
+DivisionUnit = Unit
+SpecialistUnit = Unit
 
 
-class SpecialistUnit(_UnitBase):
-    level: Level = "specialist"
-
-    def __init__(self, owner: "CodingAgent", role: RoleSpec) -> None:
-        super().__init__(owner)
-        self.role = role
-        self.unit_id = role.id
-        self.name = role.name
-
-    def _select(self, session: Session, files: list[str]) -> Team:
-        if self.role.id == AGENT.lead:
-            # Calling the Engineering Director alone answers "who would you put on this?"
-            team = TeamAssembler(self.owner.router, use_director_llm=self.owner.use_director_llm).assemble(
-                session.request, files)
-            session.record(RoleOutput(
-                role=self.role.id, phase="plan", summary=team.rationale,
-                decisions=[f"Team: {', '.join(team.ids)}"],
-            ), self.role.division)
-            return Team([self.role], team.rationale, [], team.scores)
-        return Team([self.role], f"{self.role.name} called directly.")
-
-
-class CodingAgent(_UnitBase):
-    """The agent-level unit; also the factory for its divisions and specialists."""
-
-    level: Level = "agent"
+class CodingAgent(Unit):
+    """The agent: the root unit, and the way to reach every unit below it."""
 
     def __init__(
         self,
         router: ModelRouter | None = None,
         *,
+        tree: Tree | None = None,
         use_director_llm: bool = True,
         max_repairs: int = 2,
         remember_runs: bool = True,
     ) -> None:
-        super().__init__(self)
-        self.router = router or ModelRouter()
-        self.use_director_llm = use_director_llm
-        self.max_repairs = max_repairs
-        self.remember_runs = remember_runs
-        self.unit_id = AGENT.id
-        self.name = AGENT.name
+        runtime = Runtime(router, tree=tree, use_director_llm=use_director_llm, max_repairs=max_repairs,
+                          remember_runs=remember_runs)
+        super().__init__(runtime.tree.root, runtime)
 
     @classmethod
     def with_client(cls, client: LLMClient, **kwargs: Any) -> "CodingAgent":
-        """Serve every tier from one client (tests, or a single hosted model)."""
+        """Serve every unit from one client (tests, or a single hosted model)."""
         return cls(ModelRouter.single(client), **kwargs)
 
     @staticmethod
@@ -159,53 +175,29 @@ class CodingAgent(_UnitBase):
         )
 
     # ---------------------------------------------------------------- units
-    def division(self, division_id: str) -> DivisionUnit:
-        if division_id not in DIVISIONS:
-            raise ValueError(f"unknown division {division_id!r}; choose from {sorted(DIVISIONS)}")
-        return DivisionUnit(self, DIVISIONS[division_id])
-
-    def specialist(self, specialist_id: str) -> SpecialistUnit:
-        if specialist_id not in ROLES:
-            raise ValueError(f"unknown specialist {specialist_id!r}")
-        return SpecialistUnit(self, ROLES[specialist_id])
-
-    def unit(self, level: str, unit_id: str | None = None) -> "_UnitBase":
-        if level == "agent":
+    def unit(self, ref: str | None = None) -> Unit:
+        """Any unit by path ("development/python_developer") or id; empty for the agent itself."""
+        if not ref:
             return self
-        if not unit_id:
-            raise ValueError(f"a {level} id is required")
-        if level == "division":
-            return self.division(unit_id)
-        if level == "specialist":
-            return self.specialist(unit_id)
-        raise ValueError(f"unknown level {level!r}")
+        try:
+            spec = self.tree.get(ref)
+        except KeyError as exc:
+            raise ValueError(str(exc).strip("'\"")) from None
+        return self if spec.level == "agent" else Unit(spec, self.runtime)
 
-    @staticmethod
-    def describe() -> dict[str, Any]:
-        """The hierarchy as data (for UIs and the API)."""
-        return {
-            "id": AGENT.id, "name": AGENT.name, "level": "agent", "lead": AGENT.lead,
-            "attachments": dict(AGENT.attachments),
-            "divisions": [
-                {
-                    "id": d.id, "name": d.name, "level": "division", "lead": d.lead, "mission": d.mission,
-                    "specialists": [
-                        {"id": r.id, "name": r.name, "level": "specialist", "kind": r.kind, "phase": r.phase,
-                         "tier": r.tier, "responsibility": r.responsibility, "has_tools": r.has_tools}
-                        for r in (ROLES[m] for m in d.members)
-                    ],
-                }
-                for d in REGISTRY.divisions
-            ],
-        }
+    def division(self, division_id: str) -> Unit:
+        unit = self.unit(division_id)
+        if unit.level != "division":
+            raise ValueError(f"{division_id!r} is not a division")
+        return unit
 
-    # -------------------------------------------------------- agent behaviour
-    def _select(self, session: Session, files: list[str]) -> Team:
-        return TeamAssembler(self.router, use_director_llm=self.use_director_llm).assemble(session.request, files)
+    def specialist(self, specialist_id: str) -> Unit:
+        unit = self.unit(specialist_id)
+        if unit.level != "specialist":
+            raise ValueError(f"{specialist_id!r} is not a specialist")
+        return unit
 
-    def _attach(self) -> bool:
-        return True
-
+    # ----------------------------------------------------------- approvals
     def apply_proposal(self, report: RunReport, invocation: InvocationContext) -> RunReport:
         """Write a ``proposed`` run's changes after a human approved them."""
         if report.status != "proposed":
@@ -214,9 +206,14 @@ class CodingAgent(_UnitBase):
         run_dir = Path(report.artifacts_dir)
         workspace.apply(report.changes, run_dir)
         report.status = "completed"
-        if self.remember_runs:
+        if self.runtime.remember_runs:
             decisions = [d for o in report.outputs for d in o.decisions]
             request = CodingRequest(task=report.task, workspace=report.workspace)
             build_context_provider(workspace, invocation).remember(memory_entry(request, report, decisions))
         write_report(run_dir, report)
         return report
+
+
+def load_unit(ref: str | None = None, **kwargs: Any) -> Unit:
+    """Load one unit to use on its own. ``kwargs`` go to ``CodingAgent`` (router, tree, ...)."""
+    return CodingAgent(**kwargs).unit(ref)
