@@ -2935,3 +2935,20 @@ def test_constraint_only_spec_gets_no_architecture_units():
     )
 
     assert result == [] and repairs == []
+
+
+def test_existing_architecture_files_get_no_units(tmp_path):
+    # Regression: a backend-only repair re-described the whole project, and every
+    # existing frontend file got a forced unit, so the coder rewrote the frontend.
+    (tmp_path / "frontend" / "components").mkdir(parents=True)
+    (tmp_path / "frontend" / "components" / "Cart.jsx").write_text("export default 1;\n", encoding="utf-8")
+    requirements = [Requirement("REQ-001", "Fix the frontend and backend app")]
+    units = [ImplementationUnit("UNIT-001", "App", "backend/app.py", satisfies=("REQ-001",))]
+
+    result, repairs = EngineeringSpecificationGenerator._complete_architecture_file_units(
+        units, requirements, ["backend/app.py", "frontend/components/Cart.jsx", "frontend/index.html"],
+        workspace_root=str(tmp_path),
+    )
+
+    assert [unit.target_path for unit in result] == ["backend/app.py", "frontend/index.html"]
+    assert [item["target_path"] for item in repairs] == ["frontend/index.html"]

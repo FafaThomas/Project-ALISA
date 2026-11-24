@@ -91,3 +91,25 @@ def test_main_guard_already_last_is_left_alone():
 
     assert move_main_guard_to_end(source) == source
     assert move_main_guard_to_end("x = 1\n") == "x = 1\n"
+
+
+def test_dropped_main_guard_is_restored():
+    # Regression: the burger repair fixed the NameError by deleting app.run().
+    from coding_agent.planner import restore_main_guard
+
+    original = "app = 1\n\nif __name__ == '__main__':\n    app.run(port=5000)\n"
+    updated = "app = 1\n\ndef create_tables():\n    pass\n"
+
+    restored = restore_main_guard(original, updated)
+
+    assert restored.startswith(updated.rstrip())
+    assert restored.rstrip().endswith("if __name__ == '__main__':\n    app.run(port=5000)")
+    compile(restored, "app.py", "exec")
+
+
+def test_main_guard_is_not_restored_when_kept_or_never_present():
+    from coding_agent.planner import restore_main_guard
+
+    kept = "x = 1\nif __name__ == '__main__':\n    print(x)\n"
+    assert restore_main_guard("if __name__ == '__main__':\n    pass\n", kept) == kept
+    assert restore_main_guard("x = 1\n", "x = 2\n") == "x = 2\n"

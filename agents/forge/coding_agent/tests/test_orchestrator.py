@@ -1762,3 +1762,32 @@ def test_unknown_verification_gate_is_rejected(tmp_path):
             FakePlanner(None), ChangeCoordinator(workspace), FakeCommandRunner(workspace),
             VerificationEngine(), verification_gate="everything",
         )
+
+
+def test_dropped_main_guard_is_restored_before_approval(tmp_path):
+    (tmp_path / "app.py").write_text(
+        "app = 1\n\nif __name__ == '__main__':\n    print(app)\n", encoding="utf-8"
+    )
+    task = make_task(tmp_path)
+    plan = make_plan(task, changes=[
+        FileChange("app.py", ChangeType.MODIFY, "Fix app", "app = 2\n"),
+    ], commands=[])
+    workspace = Workspace(tmp_path)
+    orchestrator = TaskOrchestrator(
+        FakePlanner(plan), ChangeCoordinator(workspace),
+        _ExitByCommandRunner(workspace, lambda command: False), VerificationEngine(),
+        verification_gate="files",
+    )
+    shown = []
+
+    def approve(proposed):
+        shown.append(proposed)
+        return True
+
+    result = orchestrator.run(task, approval_handler=approve)
+
+    assert result.status == TaskStatus.COMPLETED, result.errors
+    assert "if __name__ == '__main__':" in shown[0].changes[0].content
+    written = (tmp_path / "app.py").read_text(encoding="utf-8")
+    assert written.startswith("app = 2\n") and written.rstrip().endswith("print(app)")
+    assert any(note.startswith("Restored the if __name__") for note in result.notes)

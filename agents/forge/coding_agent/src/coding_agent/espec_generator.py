@@ -279,6 +279,7 @@ class EngineeringSpecificationGenerator:
 
         trace: list[GenerationTrace] = []
         self._validation_errors = []
+        self._workspace_root = workspace
 
         requirements_data = self._stage(
             "requirements", trace,
@@ -1943,7 +1944,7 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         return result, repairs
 
     @classmethod
-    def _complete_architecture_file_units(cls, units, requirements, architecture_paths):
+    def _complete_architecture_file_units(cls, units, requirements, architecture_paths, workspace_root=None):
         """Add an implementation unit for every architecture file that has none.
 
         The architecture is the list of files the project consists of. A file
@@ -1951,6 +1952,10 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
         missing it (the burger shop lost frontend/index.html and src/main.jsx this
         way). The new unit serves the requirements that name the file, else those
         of other units in the same folder, else those that name its top folder.
+
+        Files that already exist in the workspace are skipped: a follow-up request
+        re-describes the whole project, and forcing a unit on every existing file
+        made a backend-only repair rewrite the entire frontend.
         """
         result = list(units)
         repairs = []
@@ -1977,6 +1982,8 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
                 not path or path.endswith("/") or path.casefold() in covered
                 or ("." not in name and name.casefold() not in extensionless_files)
             ):
+                continue
+            if workspace_root and (Path(workspace_root) / path).is_file():
                 continue
             folder = PurePosixPath(path).parent.as_posix()
             top_folder = path.split("/", 1)[0] if "/" in path else ""
@@ -2887,7 +2894,8 @@ CONTRACTS: {[self._contract_dict(x) for x in contracts]}""",
             # Every file the architecture lists must be written; a file without an
             # implementation unit would otherwise be silently skipped by the planner.
             units, architecture_file_repairs = self._complete_architecture_file_units(
-                units, requirements, architecture_paths
+                units, requirements, architecture_paths,
+                workspace_root=getattr(self, "_workspace_root", None),
             )
             completion_repairs["implementation_units"].extend(architecture_file_repairs)
             units, verification, normalization_repairs = (

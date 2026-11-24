@@ -123,6 +123,31 @@ def move_main_guard_to_end(source: str) -> str:
     return "".join(kept) + "\n\n" + "".join(moved)
 
 
+def restore_main_guard(original: str, updated: str) -> str:
+    """Put back a `__main__` block that a modification dropped.
+
+    A small model fixing an unrelated error sometimes deletes the script's
+    entry point (the burger repair removed `app.run()`), so the file still
+    compiles but no longer runs as a program. If the original had a guard and
+    the update has none, the original guard is appended to the end.
+    """
+    try:
+        original_tree = ast.parse(original)
+        updated_tree = ast.parse(updated)
+    except SyntaxError:
+        return updated
+    if any(_is_main_guard(node) for node in updated_tree.body):
+        return updated
+    guards = [node for node in original_tree.body if _is_main_guard(node)]
+    if not guards:
+        return updated
+    lines = original.splitlines(keepends=True)
+    blocks = "".join("".join(lines[node.lineno - 1:node.end_lineno]) for node in guards)
+    if not blocks.endswith(("\n", "\r")):
+        blocks += "\n"
+    return updated.rstrip() + "\n\n\n" + blocks
+
+
 def import_time_argument_read(source: str) -> int | None:
     """Line where a module reads command-line arguments while being imported, or None.
 

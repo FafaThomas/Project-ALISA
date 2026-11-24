@@ -33,7 +33,7 @@ from coding_agent.retry import (
     build_recovery_context,
 )
 from coding_agent.task_journal import TaskEventJournal, TaskJournalError
-from coding_agent.planner import CodingPlanner, PlanningError
+from coding_agent.planner import CodingPlanner, PlanningError, restore_main_guard
 from coding_agent.command_runner import CommandRunner
 from coding_agent.verification_planner import _FILE_CHECK_SCRIPT, VerificationPlanner
 from coding_agent.workspace import WorkspacePathError
@@ -147,6 +147,35 @@ class TaskOrchestrator:
             raise OrchestrationError(
                 "Task workspace does not match the authorized workspace"
             )
+
+    def _restore_dropped_main_guards(self, plan, notes):
+        """Re-add `__main__` blocks that planned Python modifications deleted."""
+        workspace = self.coordinator.workspace
+        changes = list(plan.changes)
+        for index, change in enumerate(changes):
+            if (
+                change.change_type == ChangeType.DELETE
+                or not change.content
+                or not change.path.casefold().endswith(".py")
+            ):
+                continue
+            try:
+                target = workspace.resolve_path(change.path)
+                if not target.is_file():
+                    continue
+                original = target.read_text(encoding="utf-8-sig")
+            except (WorkspacePathError, OSError, UnicodeDecodeError):
+                continue
+            restored = restore_main_guard(original, change.content)
+            if restored != change.content:
+                changes[index] = replace(change, content=restored)
+                notes.append(
+                    f"Restored the if __name__ == '__main__' block of '{change.path}' "
+                    "that the plan had removed."
+                )
+        if changes == list(plan.changes):
+            return plan
+        return replace(plan, changes=tuple(changes))
 
     def _normalize_proposal_operation(self, proposal):
         """Align create/modify metadata with the authorized workspace inventory.
@@ -775,6 +804,7 @@ class TaskOrchestrator:
 
         while True:
             try:
+                plan = self._restore_dropped_main_guards(plan, notes)
                 approved_changes = []
                 normalized_proposals = []
                 for index, proposal in enumerate(plan.changes):
