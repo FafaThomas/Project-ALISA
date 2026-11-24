@@ -206,3 +206,57 @@ def test_readme_requirement_is_an_artifact_check_not_a_tagged_test(tmp_path):
 
     assert "coding_agent.specification_checks" in criterion.command
     assert not any(part.startswith("req_") for part in criterion.command)
+
+
+def test_joined_commands_are_dropped_and_checked_by_tagged_tests(tmp_path):
+    # Regression: the calculator spec ran three commands as one argv and failed on usage.
+    spec = _spec(tmp_path, [
+        VerificationCriterion(
+            "VER-002", "Verify CLI behavior for valid and invalid inputs", VerificationKind.BEHAVIORAL,
+            command=("python", "main.py", "2", "+", "3", "python", "main.py", "2", "*", "0"),
+            covers=("REQ-002",),
+        ),
+    ])
+
+    prepared, notes = SpecificationCheckPlanner(tmp_path).prepare(spec)
+    criterion = prepared.verification[0]
+
+    assert "main.py" not in criterion.command
+    assert "req_002" in criterion.command
+    assert any("joins several commands" in note for note in notes)
+
+
+def test_python_dash_m_pytest_is_not_mistaken_for_joined_commands(tmp_path):
+    spec = _spec(tmp_path, [
+        VerificationCriterion("VER-006", "Run the tests", VerificationKind.BEHAVIORAL,
+                              command=("python", "-m", "pytest", "-q"), covers=("REQ-002",)),
+    ])
+
+    prepared, _ = SpecificationCheckPlanner(tmp_path).prepare(spec)
+
+    assert prepared.verification[0].command == ("python", "-m", "pytest", "-q")
+
+
+def test_documentation_review_passes_when_readme_exists_and_fails_when_empty(tmp_path):
+    import json
+    import pytest as _pytest
+    from coding_agent.specification_checks import CheckFailure, run_checks
+
+    spec = _spec(tmp_path, [
+        VerificationCriterion("VER-005", "Manual review of documentation content",
+                              VerificationKind.MANUAL, covers=("REQ-009",)),
+    ])
+
+    prepared, notes = SpecificationCheckPlanner(tmp_path).prepare(spec)
+    criterion = prepared.verification[0]
+
+    assert criterion.kind == VerificationKind.STATIC
+    assert "coding_agent.specification_checks" in criterion.command
+    assert any("documentation review accepted" in note for note in notes)
+
+    payload = json.loads(criterion.command[-1])
+    (tmp_path / "README.md").write_text("# Calculator\n\nRun python main.py 2 + 3\n", encoding="utf-8")
+    assert run_checks(tmp_path, payload)
+    (tmp_path / "README.md").write_text("  \n", encoding="utf-8")
+    with _pytest.raises(CheckFailure, match="empty"):
+        run_checks(tmp_path, payload)

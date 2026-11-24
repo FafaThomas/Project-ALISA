@@ -23,12 +23,18 @@ _HUMAN_JUDGMENT = re.compile(
 )
 
 
-def _is_python_toolchain(program: str) -> bool:
-    """True for python/py executables, including full paths such as sys.executable."""
-    name = Path(str(program).replace("\\", "/")).name.casefold()
-    return name in {"python", "python3", "py", "python.exe", "python3.exe", "py.exe", "pytest", "pytest.exe"} or (
-        name.startswith("python") and name.replace(".exe", "").replace("python", "").replace(".", "").isdigit()
+def _is_python_executable(program: str) -> bool:
+    """True for python/py interpreters, including full paths such as sys.executable."""
+    name = Path(str(program).replace("\\", "/")).name.casefold().removesuffix(".exe")
+    return name in {"python", "python3", "py"} or (
+        name.startswith("python") and name.removeprefix("python").replace(".", "").isdigit()
     )
+
+
+def _is_python_toolchain(program: str) -> bool:
+    """True for a Python interpreter or pytest."""
+    name = Path(str(program).replace("\\", "/")).name.casefold().removesuffix(".exe")
+    return _is_python_executable(program) or name == "pytest"
 
 
 def requirement_marker(requirement_id: str) -> str:
@@ -61,6 +67,12 @@ class SpecificationCheckPlanner:
             unit.target_path for unit in specification.implementation_units
             if unit.kind.value == "test" and Path(unit.target_path).suffix.lower() == ".py"
         }))
+        documentation_requirement_ids = {
+            requirement_id
+            for unit in specification.implementation_units
+            if unit.kind.value == "documentation"
+            for requirement_id in unit.satisfies
+        }
         prepared = []
         notes = []
         for criterion in specification.verification:
@@ -71,12 +83,30 @@ class SpecificationCheckPlanner:
             if criterion.command and not _is_python_toolchain(criterion.command[0]):
                 notes.append(f"{criterion.criterion_id}: dropped proposed command {criterion.command[0]!r} (not the project's Python toolchain)")
                 criterion = replace(criterion, command=())
+            # A second interpreter inside the arguments means several commands were
+            # joined into one (e.g. "python main.py 2 + 3 python main.py 2 * 0").
+            # Run as one argv, it fails for reasons unrelated to the code.
+            if criterion.command and any(_is_python_executable(part) for part in criterion.command[1:]):
+                notes.append(f"{criterion.criterion_id}: dropped proposed command that joins several commands into one")
+                criterion = replace(criterion, command=())
             covered_requirement_ids = set()
             for reference in criterion.covers:
                 if reference in requirements:
                     covered_requirement_ids.add(reference)
                 elif reference in units:
                     covered_requirement_ids.update(units[reference].satisfies)
+            # A manual review of documentation is accepted when the document exists
+            # and is not empty (plus any topics the spec explicitly requires), so it
+            # goes to the artifact check instead of waiting for a human.
+            documentation_review = (
+                criterion.kind == VerificationKind.MANUAL
+                and bool(covered_requirement_ids)
+                and all(
+                    item in documentation_requirement_ids
+                    or re.search(r"\breadme\b", requirements[item].description, re.I)
+                    for item in covered_requirement_ids
+                )
+            )
             test_requirements = [
                 requirements[item] for item in sorted(covered_requirement_ids)
                 if re.search(r"\b(?:add|create|write|implement)\b", requirements[item].description, re.I)
@@ -145,10 +175,18 @@ class SpecificationCheckPlanner:
                 ))
                 notes.append(f"{criterion.criterion_id}: mapped to requirement-tagged tests ({markers})")
                 continue
-            if (criterion.kind == VerificationKind.MANUAL and not generated_manual_fallback) or criterion.command:
+            if (
+                criterion.kind == VerificationKind.MANUAL
+                and not generated_manual_fallback
+                and not documentation_review
+            ) or criterion.command:
                 prepared.append(criterion)
                 continue
-            if criterion.kind not in {VerificationKind.STATIC, VerificationKind.STRUCTURAL} and not generated_manual_fallback:
+            if (
+                criterion.kind not in {VerificationKind.STATIC, VerificationKind.STRUCTURAL}
+                and not generated_manual_fallback
+                and not documentation_review
+            ):
                 prepared.append(replace(
                     criterion, kind=VerificationKind.MANUAL, command=(),
                     description=criterion.description.rstrip() + (
@@ -206,10 +244,18 @@ class SpecificationCheckPlanner:
                 )
                 prepared.append(replace(
                     criterion,
-                    kind=VerificationKind.STATIC if generated_manual_fallback else criterion.kind,
+                    kind=(
+                        VerificationKind.STATIC
+                        if generated_manual_fallback or documentation_review
+                        else criterion.kind
+                    ),
                     command=command,
                 ))
-                notes.append(f"{criterion.criterion_id}: deterministic artifact check prepared")
+                notes.append(
+                    f"{criterion.criterion_id}: "
+                    + ("documentation review accepted as an artifact check (document exists and is not empty)"
+                       if documentation_review else "deterministic artifact check prepared")
+                )
             elif generated_manual_fallback and python_test_paths and behavior_requirement_ids and not artifact_requirement:
                 # A gap-fill checklist exists only because the model supplied no
                 # check. With no artifact check available, require tagged tests
