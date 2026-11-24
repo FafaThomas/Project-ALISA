@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import ast
+import builtins
 import json
 import logging
 import re
@@ -60,8 +62,65 @@ def _normalize_model_file_content(path: str, content: str | None) -> str | None:
                 f"valid: {exc.msg} (line {exc.lineno}). The plan was rejected "
                 "before approval; no workspace files were changed."
             ) from exc
+        undefined = undefined_python_names(content)
+        if undefined:
+            listed = ", ".join(f"{name} (line {line})" for name, line in undefined)
+            raise ValueError(
+                f"Generated Python content for {path!r} uses names it never defines "
+                f"or imports: {listed}. Add the missing import or definition. The plan "
+                "was rejected before approval; no workspace files were changed."
+            )
 
     return content
+
+
+_MODULE_DUNDERS = {
+    "__file__", "__name__", "__doc__", "__spec__", "__loader__", "__package__",
+    "__builtins__", "__path__", "__annotations__", "__class__",
+}
+
+
+def undefined_python_names(source: str) -> list[tuple[str, int]]:
+    """Names a Python file reads but never defines, imports, or gets from builtins.
+
+    Deliberately conservative: a name counts as defined if it is bound anywhere
+    in the file, so scoping subtleties never cause a false report. A file with
+    ``from x import *`` is skipped, since its names cannot be known statically.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    defined: set[str] = set()
+    first_use: dict[str, int] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
+            return []
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Load):
+                first_use.setdefault(node.id, node.lineno)
+            else:
+                defined.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.arg):
+            defined.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                defined.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            defined.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            defined.update(node.names)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            defined.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            defined.add(node.rest)
+    known = defined | set(dir(builtins)) | _MODULE_DUNDERS
+    return sorted(
+        ((name, line) for name, line in first_use.items() if name not in known),
+        key=lambda item: item[1],
+    )
 
 
 class CodingPlanner:

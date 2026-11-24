@@ -520,7 +520,10 @@ class TaskOrchestrator:
                 if (
                     specification is None
                     or "Generated Python content for" not in message
-                    or "not syntactically valid" not in message
+                    or (
+                        "not syntactically valid" not in message
+                        and "never defines or imports" not in message
+                    )
                     or self.max_planning_corrections < 1
                 ):
                     raise
@@ -529,7 +532,8 @@ class TaskOrchestrator:
                     f"{message}\n"
                     "Regenerate the complete implementation plan. The Python file "
                     "named in the diagnostic must contain valid Python source from "
-                    "its first character. Do not include Markdown fences, prose, "
+                    "its first character, and must import or define every name it "
+                    "uses. Do not include Markdown fences, prose, "
                     "YAML, JSON, or shell commands in a .py file. Preserve the "
                     "required ESpec paths and all valid implementation obligations."
                 )

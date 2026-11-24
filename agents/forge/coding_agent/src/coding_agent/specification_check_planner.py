@@ -5,12 +5,20 @@ import json
 import re
 import sys
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from coding_agent.engineering_spec import (
     EngineeringSpecification,
     RequirementKind,
     VerificationKind,
+)
+
+
+# Wording about how code is laid out across files rather than what it does.
+_ORGANIZATION = re.compile(
+    r"\bseparat\w*|\b(?:code|project|module|file|folder|directory)\s+"
+    r"(?:structure|organi[sz]ation|layout)\b|\borgani[sz]e\w*\s+(?:the\s+)?(?:code|project|modules|files)\b",
+    re.IGNORECASE,
 )
 
 
@@ -63,19 +71,50 @@ def project_toolchain(project_paths) -> set[str]:
     return allowed
 
 
-def command_rejection(command, allowed_programs) -> str | None:
+# Modules "python -m" may run without being part of the project: test runners
+# and compile checks that ship with Python or with the test setup.
+_PYTHON_RUNNER_MODULES = {"pytest", "unittest", "py_compile", "compileall", "doctest"}
+
+
+def project_python_modules(project_paths) -> set[str]:
+    """Importable module names for the project's Python files (tests/test_x.py -> tests.test_x, tests)."""
+    modules: set[str] = set()
+    for path in project_paths:
+        parts = PurePosixPath(str(path).replace("\\", "/")).parts
+        if not parts or not parts[-1].endswith(".py"):
+            continue
+        dotted = [*parts[:-1], parts[-1][:-3]]
+        if dotted[-1] == "__init__":
+            dotted = dotted[:-1]
+        for end in range(1, len(dotted) + 1):
+            modules.add(".".join(dotted[:end]))
+    return modules
+
+
+def command_rejection(command, allowed_programs, project_modules=frozenset()) -> str | None:
     """Why a model-proposed command must not run, or None when it may.
 
     Proposed commands run unchecked, so they are limited to the project's
-    toolchain, and a command that joins several commands into one argv (a
-    second interpreter or the same program again among its arguments) is
-    rejected, since it fails for reasons unrelated to the code.
+    toolchain. "python -m" may run only test runners, compile checks, the
+    agent's own checks, or the project's modules, not arbitrary tools the
+    environment may lack (flake8, black, ...). A command that joins several
+    commands into one argv (a second interpreter or the same program again
+    among its arguments) is rejected, since it fails for reasons unrelated to
+    the code.
     """
     if not command:
         return None
     program = _program_name(command[0])
     if not (_is_python_executable(command[0]) or program in allowed_programs):
         return f"program {command[0]!r} is not part of the project's toolchain"
+    if _is_python_executable(command[0]) and len(command) >= 2 and command[1] == "-m":
+        module = command[2] if len(command) >= 3 else ""
+        if not (
+            module in _PYTHON_RUNNER_MODULES
+            or module.split(".")[0] == "coding_agent"
+            or module in project_modules
+        ):
+            return f"module {module!r} is not a test runner, compile check, or project module"
     for part in command[1:]:
         if _is_python_executable(part) or _program_name(part) == program:
             return "it joins several commands into one"
@@ -116,9 +155,28 @@ class SpecificationCheckPlanner:
             existing_files = [item.name for item in self.root.iterdir() if item.is_file()]
         except OSError:
             existing_files = []
-        allowed_programs = project_toolchain(
-            [unit.target_path for unit in specification.implementation_units] + existing_files
-        )
+        project_paths = [unit.target_path for unit in specification.implementation_units] + existing_files
+        allowed_programs = project_toolchain(project_paths)
+        project_modules = project_python_modules(project_paths)
+        # Count only units that hold the requirement's code or files; a test unit
+        # verifies a requirement rather than laying it out.
+        units_per_requirement: dict[str, int] = {}
+        for unit in specification.implementation_units:
+            if unit.kind.value == "test":
+                continue
+            for requirement_id in unit.satisfies:
+                units_per_requirement[requirement_id] = units_per_requirement.get(requirement_id, 0) + 1
+
+        def organization_requirement(requirement_id: str) -> bool:
+            # "Separate X, Y, and Z" is about code layout and spans several files.
+            # It is checked by confirming those files exist, not by a behavior test.
+            requirement = requirements.get(requirement_id)
+            return (
+                requirement is not None
+                and units_per_requirement.get(requirement_id, 0) >= 2
+                and bool(_ORGANIZATION.search(requirement.description))
+            )
+
         documentation_requirement_ids = {
             requirement_id
             for unit in specification.implementation_units
@@ -131,7 +189,7 @@ class SpecificationCheckPlanner:
             # Commands proposed by the model run unchecked, so only the project's
             # own toolchain may run (see command_rejection); a dropped command's
             # criterion is then checked by tests, an artifact check, or a human.
-            rejection = command_rejection(criterion.command, allowed_programs)
+            rejection = command_rejection(criterion.command, allowed_programs, project_modules)
             if rejection:
                 notes.append(f"{criterion.criterion_id}: dropped proposed command because {rejection}")
                 criterion = replace(criterion, command=())
@@ -197,6 +255,7 @@ class SpecificationCheckPlanner:
                 self._AUTOMATABLE.search(
                     " ".join((requirements[item].description, *requirements[item].acceptance_criteria))
                 )
+                or organization_requirement(item)
                 for item in behavior_requirement_ids
             )
             if (
@@ -260,7 +319,10 @@ class SpecificationCheckPlanner:
                 + [r.description + " " + " ".join(r.acceptance_criteria) for r in selected_requirements]
                 + [unit.target_path + " " + " ".join(unit.acceptance_criteria) for unit in selected_units.values()]
             )
-            can_check = bool(selected_requirements) and bool(self._AUTOMATABLE.search(description_text))
+            can_check = bool(selected_requirements) and (
+                bool(self._AUTOMATABLE.search(description_text))
+                or any(organization_requirement(item.requirement_id) for item in selected_requirements)
+            )
             # Process rules are not artifact assertions and must be attested by a human.
             if re.search(
                 r"global working rules|report changed files|next work package|only relevant verification|human evidence|"

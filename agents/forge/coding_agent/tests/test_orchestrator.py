@@ -1558,3 +1558,53 @@ def test_orchestrator_uses_focused_repair_for_missing_espec_units(tmp_path):
     assert planner.repair_request["required_paths"] == ("README.md",)
     assert not (tmp_path / "config.yml").exists()
     assert not (tmp_path / "README.md").exists()
+
+
+def test_undefined_name_in_generated_python_gets_the_bounded_planning_correction(tmp_path):
+    from coding_agent.engineering_spec import (
+        ArchitectureModule, EngineeringSpecification, ImplementationUnit, Requirement,
+    )
+    from coding_agent.planner import _normalize_model_file_content
+
+    task = make_task(tmp_path)
+    specification = EngineeringSpecification(
+        specification_id="spec-undefined-name-repair",
+        task_id=task.task_id,
+        objective="Create a CLI test",
+        workspace=str(tmp_path),
+        requirements=(Requirement("REQ-1", "Test the command line."),),
+        architecture=(ArchitectureModule("tests", "Tests", "CLI tests", file_paths=("test_cli.py",)),),
+        implementation_units=(ImplementationUnit("UNIT-1", "CLI test", "test_cli.py", satisfies=("REQ-1",)),),
+    )
+    valid_plan = make_plan(task, changes=[
+        FileChange("test_cli.py", ChangeType.CREATE, "Create CLI test", "import subprocess\n"),
+    ], commands=[])
+
+    class UndefinedThenValidPlanner:
+        def __init__(self):
+            self.contexts = []
+            self.calls = 0
+
+        def plan(self, requested_task, context="", specification=None):
+            self.contexts.append(context)
+            self.calls += 1
+            if self.calls == 1:
+                # Real planner validation of a test that forgot `import subprocess`.
+                _normalize_model_file_content(
+                    "test_cli.py", "def test_cli():\n    subprocess.run(['python', 'main.py'])\n"
+                )
+            return valid_plan
+
+    workspace = Workspace(tmp_path)
+    planner = UndefinedThenValidPlanner()
+    orchestrator = TaskOrchestrator(
+        planner, ChangeCoordinator(workspace), FakeCommandRunner(workspace), VerificationEngine(),
+        max_planning_corrections=1,
+    )
+
+    result = orchestrator.run(task, approval_handler=lambda proposed: False, specification=specification)
+
+    assert result.status == TaskStatus.BLOCKED
+    assert planner.calls == 2
+    assert "PLAN CONTENT SYNTAX FAILURE" in planner.contexts[1]
+    assert "uses names it never defines or imports: subprocess (line 2)" in planner.contexts[1]
