@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from dataclasses import asdict
@@ -33,6 +34,14 @@ MAX_READ_BYTES = 400_000
 
 class WorkspaceError(ValueError):
     """A path or write was rejected by the workspace guard."""
+
+
+def file_sha256(path: Path) -> str | None:
+    """SHA-256 of a file's bytes; None when there is no readable file."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 # Templates that document settings without holding real values.
@@ -164,6 +173,9 @@ class ChangeSet:
         self.workspace = workspace
         self._changes: dict[str, FileChange] = {}
         self._owners: dict[str, tuple[str, str]] = {}   # path -> (work item id, owner role)
+        # path -> hash of the file on disk when the team first changed it (None: no file yet). A proposal
+        # applied later refuses to overwrite files edited since then (see units.proposal_conflicts).
+        self._base: dict[str, str | None] = {}
 
     def claim(self, path: str, work_item_id: str, owner_role: str) -> None:
         """Record that ``path`` belongs to a work item. The first claim wins."""
@@ -199,8 +211,13 @@ class ChangeSet:
             # The label describes the effect on disk, however many times the file changed this run.
             on_disk = (self.workspace.root / change.path).is_file()
             change.action = "modify" if on_disk else "create"
+        self._base.setdefault(change.path, file_sha256(self.workspace.root / change.path))
         self._changes[change.path] = change
         return change
+
+    def base_hashes(self) -> dict[str, str | None]:
+        """For each changed path, the hash of the file on disk when the team first changed it."""
+        return {path: self._base.get(path) for path in self._changes}
 
     def current(self, path: str) -> str | None:
         """Content of a path as the team currently sees it."""

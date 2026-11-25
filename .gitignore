@@ -31,6 +31,8 @@ __pycache__/
 
 .vscode/
 .idea/
+# The VS Code extension's launch and build tasks are part of its source.
+!services/VSCode_Plugin/.vscode/
 
 # ==========================================================
 # Logs

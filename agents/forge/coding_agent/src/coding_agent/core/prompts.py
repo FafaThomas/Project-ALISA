@@ -114,6 +114,22 @@ TEAM_SCHEMA: dict[str, Any] = {
     "required": ["rationale", "team"],
 }
 
+ANSWER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"answer": _STR, "files": _STR_LIST},
+    "required": ["answer", "files"],
+}
+
+# Any specialist can answer questions (chat); this replaces its kind's instructions for that call.
+ASK_INSTRUCTIONS = (
+    "The user is asking a question about their project; the question is under 'Task'. Answer it from your "
+    "specialty, using the context below, which is read from the workspace. Files listed as 'Assigned file' "
+    "are the ones the user has open or selected. Be specific: name the files, functions and settings you can "
+    "see. If the context does not show something, say so instead of guessing. Do not change files and do not "
+    "write whole files; short code snippets are fine. Write 'answer' in Markdown, and list in 'files' the "
+    "workspace-relative paths your answer refers to."
+)
+
 SCHEMA_BY_KIND: dict[str, dict[str, Any]] = {
     "analyst": NOTES_SCHEMA,
     "planner": NOTES_SCHEMA,

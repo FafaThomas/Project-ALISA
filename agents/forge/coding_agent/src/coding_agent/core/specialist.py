@@ -25,11 +25,12 @@ from .blackboard import Blackboard
 from .context.base import ContextProvider
 from .hooks import load_hooks
 from .llm import LLMError, ModelRouter, OutputLimitError
-from .models import CodingRequest, FileChange, Finding, RoleOutput, WorkItem
+from .models import Answer, CodingRequest, FileChange, Finding, RoleOutput, WorkItem
 from .projectdocs import facts_for_files, requirements
 from .projectfacts import ProjectView
 from .prompts import (
-    SCHEMA_BY_KIND, TEST_PLAN_INSTRUCTIONS, TEST_PLAN_SCHEMA, WORK_ITEMS_SCHEMA, system_prompt,
+    ANSWER_SCHEMA, ASK_INSTRUCTIONS, SCHEMA_BY_KIND, TEST_PLAN_INSTRUCTIONS, TEST_PLAN_SCHEMA, WORK_ITEMS_SCHEMA,
+    system_prompt,
 )
 from .pyinterface import signatures
 from .registry import RoleSpec, Tree
@@ -41,6 +42,8 @@ SPLIT_AT = 3
 # Roughly 3 characters per token leaves room for output in a 16k-token window.
 DEFAULT_PROMPT_BUDGET = 36_000
 SEVERITIES = ("info", "low", "medium", "high", "critical")
+# Chat turns a specialist sees when answering a follow-up question.
+ASK_HISTORY_TURNS = 8
 
 
 def _str_list(value: Any) -> list[str]:
@@ -502,6 +505,24 @@ class Specialist:
     def review(self, request: CodingRequest, board: Blackboard, subject: list[tuple[str, str, str]], *,
                limit: int = 6000, label: str = "Proposed changes") -> RoleOutput:
         return self._after(self._do_review(request, board, subject, limit=limit, label=label), "review")
+
+    def answer(self, request: CodingRequest, history: list[dict[str, str]] | None = None,
+               focus_files: list[str] | None = None) -> Answer:
+        """Answer the question in ``request.task`` (chat). Proposes nothing; hooks do not apply."""
+        sections = []
+        if history:
+            turns = [f"**{'User' if turn['role'] == 'user' else self.role.name}:** {turn['text']}"
+                     for turn in history[-ASK_HISTORY_TURNS:]]
+            sections.append("## Conversation so far\n" + "\n\n".join(turns))
+        try:
+            reply = self._ask(request, sections, query=request.task, focus_files=focus_files or None,
+                              schema_override=ANSWER_SCHEMA, instructions=ASK_INSTRUCTIONS)
+        except LLMError as exc:
+            return Answer(role=self.role.id, answer="", error=str(exc), model=self.last_model,
+                          model_source=self.last_model_source)
+        return Answer(role=self.role.id, answer=str(reply.get("answer") or "").strip(),
+                      files=_str_list(reply.get("files")), model=self.last_model,
+                      model_source=self.last_model_source, tokens=dict(self.last_tokens))
 
 
 def merge_parts(role: str, phase: str, parts: list[RoleOutput]) -> RoleOutput:

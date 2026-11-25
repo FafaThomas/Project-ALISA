@@ -1,0 +1,175 @@
+{
+  "name": "alisa-coding-agent",
+  "displayName": "ALISA Coding Agent",
+  "description": "Chat and code with ALISA Forge's coding agent: ask about your project, give its team a task, review the proposed changes as diffs and apply them.",
+  "version": "0.1.0",
+  "publisher": "project-alisa",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "alisa",
+    "coding agent",
+    "multi-agent",
+    "ollama"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "alisa",
+          "title": "ALISA",
+          "icon": "media/alisa.svg"
+        }
+      ]
+    },
+    "views": {
+      "alisa": [
+        {
+          "type": "webview",
+          "id": "alisa.chat",
+          "name": "Coding Agent"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "alisa.newChat",
+        "title": "New Chat",
+        "category": "ALISA",
+        "icon": "$(add)"
+      },
+      {
+        "command": "alisa.sendSelection",
+        "title": "Send Selection to Chat",
+        "category": "ALISA"
+      },
+      {
+        "command": "alisa.restartServer",
+        "title": "Restart Agent Server",
+        "category": "ALISA",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "alisa.showOutput",
+        "title": "Show Agent Server Output",
+        "category": "ALISA",
+        "icon": "$(output)"
+      },
+      {
+        "command": "alisa.setToken",
+        "title": "Set Server Token",
+        "category": "ALISA"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "alisa.newChat",
+          "when": "view == alisa.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "alisa.restartServer",
+          "when": "view == alisa.chat",
+          "group": "overflow@1"
+        },
+        {
+          "command": "alisa.showOutput",
+          "when": "view == alisa.chat",
+          "group": "overflow@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "alisa.sendSelection",
+          "when": "editorHasSelection",
+          "group": "9_alisa@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ALISA Coding Agent",
+      "properties": {
+        "alisa.server.url": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "URL of a coding agent service you started yourself (`coding-agent serve`), e.g. `http://127.0.0.1:8765`. Leave empty to have the extension start its own local service for the open folders. Set the service's token with **ALISA: Set Server Token**."
+        },
+        "alisa.server.command": {
+          "type": "string",
+          "default": "coding-agent",
+          "markdownDescription": "Program that starts the local service. The extension adds `serve --allow-root <folder> --host 127.0.0.1 --port <free port>`. Use `python` together with `#alisa.server.args#` = `[\"-m\", \"coding_agent\"]` to pick a specific Python."
+        },
+        "alisa.server.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Arguments placed before `serve` when starting the local service."
+        },
+        "alisa.server.allowedRoots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra folders the local service may work in, besides the open workspace folders."
+        },
+        "alisa.run.autoApply": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Let the team write its changes as soon as they pass the files gate, without the review step. Off: every run is a proposal you review and apply."
+        },
+        "alisa.run.fixReviewFindings": {
+          "type": "boolean",
+          "default": false,
+          "description": "Send high and critical review findings back to the team for one fix round."
+        },
+        "alisa.run.maxTeamSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null,
+          "minimum": 1,
+          "description": "Most specialists on a run's team. Empty: the agent's default."
+        },
+        "alisa.run.targetEnvironment": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Where the generated code must run, e.g. `Windows 11, Python 3.12`. Empty: the service's `CODING_AGENT_TARGET_ENVIRONMENT`, else the machine running it."
+        },
+        "alisa.chat.shareActiveFile": {
+          "type": "boolean",
+          "default": true,
+          "description": "In Ask mode, share the file in the active editor with the specialist who answers (you can turn it off per question)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test \"out/test/*.test.js\"",
+    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^20.17.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.2.1",
+    "jsdom": "^25.0.1",
+    "typescript": "~5.6.3"
+  }
+}

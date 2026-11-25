@@ -323,8 +323,48 @@ coding-agent serve --allow-root D:\work --unit development/database_developer --
 | GET | `/units` | the served unit and everything under it |
 | POST | `/runs` | run the served unit (`?wait=true` to block) |
 | POST | `/units/<path>/runs` | run a unit under the served one |
-| GET | `/runs/<job_id>` | status, progress events, report |
+| POST | `/ask` | ask the served unit a question (see [Questions](#questions)) |
+| POST | `/units/<path>/ask` | ask a unit under the served one |
+| GET | `/runs/<job_id>` | status and progress events, then the report (runs) or the answer (questions) |
+| POST | `/proposals/apply` | write a proposed run's changes (see [Applying a proposal later](#applying-a-proposal-later)) |
 | POST | `/invoke` | internal: a parent unit delegating one step to this unit |
+
+The [VS Code extension](../../../services/VSCode_Plugin/README.md) is a client of these endpoints.
+
+### Questions
+
+`POST /ask` with `{question, workspace, history?, focus_files?}` gets an answer about the workspace
+from one model call. Nothing is written, and nothing goes into `PROJECT_MEMORY.md`, so questions don't
+push run summaries out of the memory.
+
+- **Who answers:**
+  - a specialist answers for itself
+  - a division's lead answers for its division
+  - the Codebase Analyst answers for the whole agent
+- **What the answering specialist sees:** the Markdown context a run gets, the `focus_files` as
+  assigned files, and up to 8 `history` turns (`{role: "user" | "agent", text}`).
+- **What it returns:** `answer` (Markdown) and `files`, which keeps only the paths in the answer that
+  exist in the workspace.
+- **Secrets:** focus files the workspace guard refuses, such as `.env`, are not shared. The answer's
+  `notes` say so.
+
+From Python: `load_unit("security").ask(question, workspace, invocation)`.
+
+### Applying a proposal later
+
+`POST /proposals/apply` with `{workspace, run_id, force?}` writes a `proposed` run. It works like
+approving at the CLI's prompt: backups, `changes.jsonl`, `CHANGELOG.md`, the project brief and the
+run memory.
+
+- **Read from disk.** The proposal is loaded from `.coding-agent/runs/<run_id>/`: `report.json` plus
+  the files under `proposed/`. So it survives a restart of the service. Edits made to the proposed
+  files in the meantime are what gets written.
+- **Files edited since are a conflict.** A proposed run records each file's hash at the moment the
+  team first changed it, in `proposed-base.json`. If any of those files changed on disk since, the
+  answer is HTTP 409 with `conflicts`, and nothing is written. `force: true` writes anyway; the
+  versions it replaces go to the run's `backup/` folder.
+- **One write per run.** A run that is not `proposed` (already applied, or failed the files gate)
+  answers 409.
 
 To have parents call a served unit instead of running it in-process, give the
 unit an `endpoint:` in its `unit.md`. The parent then sends that unit each step
@@ -634,6 +674,8 @@ Each run writes to `<workspace>/.coding-agent/runs/<run_id>/`:
 - `changes.jsonl` (when changes are written)
 - `backup/` (copies of overwritten files)
 - `proposed/` (when nothing was written)
+- `proposed-base.json` (next to `proposed/`: each file's hash when the team first changed it, for
+  [applying later](#applying-a-proposal-later))
 
 Runs that write changes also update `<workspace>/CHANGELOG.md` and `<workspace>/.coding-agent/PROJECT.md`
 (see [The team's tools](#the-teams-tools)). `coding-agent fix` writes to `runs/<time>-tools/`.

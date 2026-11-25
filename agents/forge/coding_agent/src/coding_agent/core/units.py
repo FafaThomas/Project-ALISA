@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import platform
+import re
 import sys
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -52,20 +53,23 @@ from .llm import ModelRouter
 from .models import (
     CodingRequest, FileChange, Finding, InvocationContext, InvocationSource, RoleOutput, RunReport,
     VerificationResult, WorkItem, file_change_from_dict, request_to_dict, role_output_from_dict,
-    work_item_from_dict,
+    run_report_from_dict, work_item_from_dict,
 )
 from .projectfacts import ProjectView
 from .registry import PHASES, RoleSpec, Tree, UnitSpec
 from .selection import division_needs_lead, score_units
 from .specialist import Specialist
 from .verification import SOFT_CHECKS, self_check_problems, verify_files
-from .workspace import ChangeSet, Workspace, WorkspaceError
+from .workspace import ChangeSet, Workspace, WorkspaceError, file_sha256
 
 LOGGER = logging.getLogger(__name__)
 Level = Literal["faction", "agent", "division", "specialist"]
 Emit = Callable[[dict], None]
 REPAIRER = "debugging_specialist"
 BUILDER_KINDS = ("builder", "repairer")
+# Hashes of the files a proposal changes, as they were on disk when the team changed them.
+PROPOSAL_BASE = "proposed-base.json"
+RUN_ID_RE = re.compile(r"[0-9]{8}-[0-9]{6}-[A-Za-z0-9]+")
 
 
 class Executor(Protocol):
@@ -790,7 +794,7 @@ def finish(session: Session, report: RunReport, *, remember: bool) -> RunReport:
         report.status = "completed"  # advisory-only units (planning, design, review)
 
     if report.status != "completed" and report.changes:
-        save_proposed(session.run_dir, report)
+        save_proposed(session.run_dir, report, base=session.changes.base_hashes())
     session.board.write(session.run_dir / "handoff.md",
                         f"# Handoff ({session.level}: {session.unit_id}): {session.request.task.strip()[:120]}")
     if remember and report.status == "completed" and (report.changes or session.outputs):
@@ -798,13 +802,54 @@ def finish(session: Session, report: RunReport, *, remember: bool) -> RunReport:
     return report
 
 
-def save_proposed(run_dir: Path, report: RunReport) -> None:
+def save_proposed(run_dir: Path, report: RunReport, base: dict[str, str | None] | None = None) -> None:
     for change in report.changes:
         if change.action == "delete":
             continue
         target = run_dir / "proposed" / change.path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(change.content, encoding="utf-8", newline="\n")
+    if base is not None:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / PROPOSAL_BASE).write_text(
+            json.dumps({c.path: base.get(c.path) for c in report.changes}, indent=2), encoding="utf-8")
+
+
+def load_proposal(workspace: Workspace, run_id: str) -> RunReport:
+    """A run read back from its folder: report.json plus the files under proposed/.
+
+    Edits made to the proposed files after the run (e.g. in an editor's diff view) are part of what is
+    loaded. The workspace and run folder come from the caller, never from report.json.
+    """
+    if not RUN_ID_RE.fullmatch(run_id or ""):
+        raise ValueError(f"invalid run id: {run_id!r}")
+    run_dir = workspace.agent_dir / "runs" / run_id
+    try:
+        data = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise LookupError(f"no run {run_id} in {workspace.root}") from None
+    report = run_report_from_dict(data)
+    report.workspace, report.artifacts_dir = str(workspace.root), str(run_dir)
+    for change in report.changes:
+        change.path = workspace.normalize(change.path)
+        if change.action == "delete":
+            continue
+        source = run_dir / "proposed" / change.path
+        if not source.is_file():
+            raise LookupError(f"run {run_id} has no proposed copy of {change.path}")
+        with source.open(encoding="utf-8", newline="") as handle:  # keep line endings as written
+            change.content = handle.read()
+    return report
+
+
+def proposal_conflicts(workspace: Workspace, report: RunReport) -> list[str]:
+    """Files of a proposal that changed on disk after the team changed them (empty without base hashes)."""
+    try:
+        base = json.loads((Path(report.artifacts_dir) / PROPOSAL_BASE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [c.path for c in report.changes
+            if c.path in base and file_sha256(workspace.root / c.path) != base[c.path]]
 
 
 def write_report(run_dir: Path, report: RunReport) -> None:

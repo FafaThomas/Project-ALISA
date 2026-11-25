@@ -210,6 +210,25 @@ class RunReport:
         return asdict(self)
 
 
+@dataclass
+class Answer:
+    """A unit's reply to a question about the workspace (chat). Nothing is written, nothing remembered."""
+
+    role: str
+    answer: str
+    # Workspace files the answer refers to; only paths that exist are kept.
+    files: list[str] = field(default_factory=list)
+    error: str = ""
+    model: str = ""
+    model_source: str = ""
+    tokens: dict[str, int] = field(default_factory=dict)
+    # Things the caller should know, e.g. an open file that was not shared because it holds secrets.
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 # ------------------------------------------------------------ wire format
 # Units deployed as their own services exchange these objects as JSON.
 def work_item_from_dict(data: dict[str, Any]) -> WorkItem:
@@ -253,3 +272,33 @@ def role_output_from_dict(data: dict[str, Any]) -> RoleOutput:
 
 def request_to_dict(request: CodingRequest) -> dict[str, Any]:
     return asdict(request)
+
+
+def run_report_from_dict(data: dict[str, Any]) -> RunReport:
+    """A report read back from ``report.json``. File contents are not in that file; callers add them."""
+    verification = data.get("verification")
+    status = data.get("status")
+    return RunReport(
+        run_id=str(data.get("run_id", "")),
+        status=status if status in ("completed", "proposed", "failed") else "failed",
+        task=str(data.get("task", "")), workspace=str(data.get("workspace", "")),
+        invocation_source=str(data.get("invocation_source", "")),
+        context_strategy=str(data.get("context_strategy", "")),
+        team=[str(t) for t in data.get("team") or []],
+        unit_level=str(data.get("unit_level", "agent")), unit_id=str(data.get("unit_id", "coding_agent")),
+        team_rationale=str(data.get("team_rationale", "")),
+        outputs=[role_output_from_dict(o) for o in data.get("outputs") or []],
+        changes=[file_change_from_dict(c) for c in data.get("changes") or []],
+        verification=VerificationResult(
+            passed=bool(verification.get("passed")), checks=[str(c) for c in verification.get("checks") or []],
+            problems=[{str(k): str(v) for k, v in p.items()} for p in verification.get("problems") or []],
+        ) if isinstance(verification, dict) else None,
+        advisory_findings=[finding_from_dict(f) for f in data.get("advisory_findings") or []],
+        error=str(data.get("error", "")),
+        warnings=[str(w) for w in data.get("warnings") or []],
+        test_run=[t for t in data.get("test_run") or [] if isinstance(t, dict)],
+        artifacts_dir=str(data.get("artifacts_dir", "")),
+        notes=[str(n) for n in data.get("notes") or []],
+        constraints=[str(c) for c in data.get("constraints") or []],
+        acceptance_criteria=[str(c) for c in data.get("acceptance_criteria") or []],
+    )

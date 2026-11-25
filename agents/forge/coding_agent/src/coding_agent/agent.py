@@ -30,14 +30,17 @@ from .core.context import build_context_provider
 from .core.projectdocs import record_run
 from .core.llm import LLMClient, ModelRouter
 from .core.models import (
-    CodingRequest, InvocationContext, InvocationSource, KnowledgeRetriever, RoleOutput, RunReport,
+    Answer, CodingRequest, InvocationContext, InvocationSource, KnowledgeRetriever, RoleOutput, RunReport,
 )
 from .core.registry import Tree, UnitSpec, default_tree
 from .core.selection import Team, TeamAssembler
+from .core.specialist import Specialist
 from .core.units import Emit, Session, finish, group_by_division, memory_entry, run_phases, write_report
-from .core.workspace import Workspace
+from .core.workspace import Workspace, WorkspaceError
 
 LOGGER = logging.getLogger(__name__)
+# Who answers questions put to the whole agent.
+ASK_DEFAULT = "codebase_analyst"
 
 
 class Runtime:
@@ -136,6 +139,63 @@ class Unit:
             session.emit({"event": "run_finished", "run_id": session.run_id, "status": report.status,
                           "error": report.error})
         return report
+
+    # ------------------------------------------------------------------ ask
+    def answerer(self) -> UnitSpec:
+        """Who answers questions put to this unit: a specialist itself, a division's lead, and for the
+        agent its Codebase Analyst (else its lead)."""
+        spec, tree = self.spec, self.tree
+        if spec.level == "specialist":
+            return spec
+        if spec.level == "agent":
+            return tree.by_id.get(ASK_DEFAULT) or tree.by_id[spec.lead]
+        if spec.lead and spec.lead in tree.by_id:
+            return tree.by_id[spec.lead]
+        members = [tree.by_id[m] for m in spec.default_members if m in tree.by_id] or tree.children(spec)
+        if not members:
+            raise ValueError(f"{spec.id} has no specialist to answer questions")
+        return members[0]
+
+    def ask(
+        self, question: str, workspace: str, invocation: InvocationContext, *,
+        history: list[dict[str, str]] | None = None, focus_files: list[str] | None = None,
+        emit: Emit | None = None,
+    ) -> Answer:
+        """Answer a question about the workspace (chat). One model call; nothing is written or remembered.
+
+        ``history`` holds earlier turns as ``{"role": "user" | "agent", "text": ...}``; ``focus_files``
+        are workspace-relative files the user has open, shared with the answering specialist.
+        """
+        emit = emit or (lambda event: None)
+        role = self.answerer()
+        root = Workspace(workspace)
+        if not root.exists:
+            return Answer(role=role.id, answer="", error=f"workspace does not exist: {workspace}")
+        shared, notes = [], []
+        for rel in focus_files or []:
+            try:
+                shared.append(root.normalize(rel))
+            except WorkspaceError as exc:
+                notes.append(f"not shared: {exc}")
+        request = CodingRequest(task=question, workspace=str(root.root), mode="propose")
+        emit({"event": "ask_started", "role": role.id, "name": role.name, "files": shared})
+        specialist = Specialist(role, self.tree, self.router, build_context_provider(root, invocation),
+                                workspace_root=root.root)
+        answer = specialist.answer(request, history, shared)
+        answer.files = list(dict.fromkeys(f for f in (_existing_file(root, f) for f in answer.files) if f))
+        answer.notes = notes + answer.notes
+        emit({"event": "ask_finished", "role": role.id, "error": answer.error, "model": answer.model,
+              "model_source": answer.model_source})
+        return answer
+
+
+def _existing_file(workspace: Workspace, relative: str) -> str | None:
+    """A path a model mentioned, normalized, if the workspace guard accepts it and the file exists."""
+    try:
+        normalized = workspace.normalize(relative)
+    except WorkspaceError:
+        return None
+    return normalized if (workspace.root / normalized).is_file() else None
 
 
 # Names kept for readability at call sites.
