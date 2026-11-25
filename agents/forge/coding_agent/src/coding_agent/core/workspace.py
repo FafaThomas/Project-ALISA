@@ -25,8 +25,14 @@ class WorkspaceError(ValueError):
     """A path or write was rejected by the workspace guard."""
 
 
+# Templates that document settings without holding real values.
+SECRET_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist")
+
+
 def is_secret(path: PurePosixPath) -> bool:
     name = path.name.lower()
+    if name.startswith(".env.") and name.endswith(SECRET_TEMPLATE_SUFFIXES):
+        return False
     return name in SECRET_NAMES or name.startswith(".env.") or name.endswith(SECRET_SUFFIXES)
 
 

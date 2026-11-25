@@ -369,21 +369,59 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
 - **Target platform.** Every specialist is told the OS and Python version the code must run on:
   this machine by default, `CODING_AGENT_TARGET_ENVIRONMENT` in `.env`, or `target_environment`
   on the request.
+- **Leads plan only their division's part.** Each division lead is told which builders from other
+  divisions are on the run, and leaves their work to them. For example, the Tech Lead leaves
+  Dockerfiles to DevOps.
+- **Existing code is kept.** Builders that modify a file must keep the functions, classes, exports and
+  URL routes already in it.
 - **The files gate** is the only blocking check. It requires that:
   - every assigned file is produced
   - Python compiles
   - JSON parses
-  - every `from x import name` between the project's own modules finds `name`
+  - **Python imports work:**
+    - every `from x import name` between the project's own modules finds `name`
+    - imported project modules exist
+    - imports are resolved from parent folders as well, as when a Django project runs from `backend/`
+    - files from earlier runs that import a changed module are checked too
+  - **Django string references point at real modules:**
+    - `include("app.urls")`
+    - `ROOT_URLCONF`, `WSGI_APPLICATION` and `ASGI_APPLICATION`
+    - `INSTALLED_APPS` and `MIDDLEWARE`
+    - middleware classes listed in `INSTALLED_APPS` are reported
+  - **JavaScript/TypeScript relative imports work:**
+    - the imported file exists
+    - default, named and `ns.member` imports match what that file exports
+    - package imports such as `react` are not checked
 
   If the gate fails, the Debugging Specialist gets up to 2 repair rounds. If it still fails, nothing is
   written, and proposals are kept under `.coding-agent/runs/<run_id>/proposed/`.
+- **Dropped code** is reported as a soft gate problem: a change that removes public functions,
+  classes, JS exports or URL routes from an existing file. The Debugging Specialist gets it first,
+  together with the file's version from before the run, so it can restore the code. If the code is
+  still missing after repairs, it becomes a warning, since the task may really have asked for the
+  removal.
 - **The Debugging Specialist's test run** (Python projects).
   - **What it runs:** once the gate passes, the Debugging Specialist plans up to 8 commands that
     exercise what the request asked for, such as `python main.py add 12.50 food`, then `list`.
   - **Where:** they run in a throwaway copy of the project, never in the workspace.
-  - **Failures:** a command that hangs (`CODING_AGENT_TEST_TIMEOUT`, default 20 s) or ends in a
-    Python traceback goes back for repair, like a gate failure. A program that exits with its own
-    error message is not a failure.
+  - **Dependencies:** when the project has `requirements.txt` files, their packages are installed
+    into a throwaway virtual environment. The environment is cached by package list under
+    `~/.alisa/forge/testrun-envs` (`CODING_AGENT_TEST_ENV_DIR`).
+    - Only plain `name[extras] <version>` lines are installed, as prebuilt wheels
+      (`--only-binary=:all:`), so no package build scripts run.
+    - URLs, local paths, `-e`, `-r` and pip options are refused.
+    - Set `CODING_AGENT_TEST_DEPS=off` to skip installing.
+  - **Subfolders:** `python manage.py check` finds `backend/manage.py` and runs it from `backend/`.
+  - **Failures:** these go back for repair, like a gate failure:
+    - a command that hangs (`CODING_AGENT_TEST_TIMEOUT`, default 20 s)
+    - a command that ends in a Python traceback
+    - a non-zero exit with an import error, even when printed without a traceback
+    - Django system-check errors (pointed at the file Django names)
+    - `makemigrations --check` finding missing migrations
+    - a package the code imports that is missing from `requirements.txt`
+
+    A program that exits with its own error message is not a failure. A command that fails only
+    because a database or other service isn't running is shown as `n/a`.
   - **Safety limits:**
     - Only `python <project file>` and `python -m <project module>` commands run, with no shell.
     - Commands with `<placeholders>` are skipped.
@@ -446,6 +484,7 @@ coding-agent serve --allow-root D:\work --unit postgres_developer --port 8801
 | `CODING_AGENT_LLM_TIMEOUT`, `CODING_AGENT_OLLAMA_NUM_PREDICT`, `CODING_AGENT_OLLAMA_NUM_CTX` | Ollama request limits |
 | `CODING_AGENT_TARGET_ENVIRONMENT` | OS and Python the generated code must run on (default: this machine) |
 | `CODING_AGENT_TEST_RUN`, `CODING_AGENT_TEST_TIMEOUT` | Debugging Specialist test run: `repair` (default), `block` or `off`; seconds per command (default 20) |
+| `CODING_AGENT_TEST_DEPS`, `CODING_AGENT_TEST_ENV_DIR`, `CODING_AGENT_TEST_INSTALL_TIMEOUT` | Install `requirements.txt` for the test run: `install` (default) or `off`; cache folder (default `~/.alisa/forge/testrun-envs`); seconds per install (default 600) |
 | `GEMINI_API_KEY`, `GEMINI_API_BASE` | Gemini access (only needed when a unit uses `gemini:`) |
 | `FORGE_GEMINI_<NAME>_MODEL` | named Gemini models, used as `gemini:@<name>` |
 | `GEMINI_QUOTA_<MODEL>` | `rpm,tpm,rpd` limits for quota-aware routing |

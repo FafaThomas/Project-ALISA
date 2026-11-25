@@ -92,7 +92,11 @@ TEST_PLAN_SCHEMA: dict[str, Any] = {
 TEST_PLAN_INSTRUCTIONS = (
     "Plan a short test run of the program the team just wrote. List up to 8 shell-free commands, each "
     "'python <project file> <args>' or 'python -m <project module> <args>', run in order from the project root in a "
-    "throwaway copy (files the program writes persist between commands). Exercise every feature the task asked "
+    "throwaway copy (files the program writes persist between commands). Give script paths from the project root "
+    "(python backend/manage.py check); a script in a subfolder runs from its own folder. The packages in the "
+    "project's requirements.txt are installed, but no database server, network or other service is running: "
+    "leave out commands that need one (for Django, use 'manage.py check' and commands that do not touch the "
+    "database, not migrate, runserver or test against PostgreSQL). Exercise every feature the task asked "
     "for, the way a user would, including one realistic error case. Commands must finish in a few seconds without "
     "keyboard input or network access. Use only arguments the code actually accepts; read the entry point's "
     "argument parsing first. Use concrete values only, never placeholders such as <id>: if a command needs a "
@@ -141,7 +145,9 @@ _KIND_INSTRUCTIONS: dict[str, str] = {
     "builder": (
         "Implement your assigned work item. Return the COMPLETE content of every file you create or modify "
         "(never a diff or a placeholder such as '...rest unchanged'). Use workspace-relative paths with forward "
-        "slashes. Stay consistent with the team's decisions and with files other developers own. Write "
+        "slashes. Stay consistent with the team's decisions and with files other developers own. When you "
+        "modify an existing file, start from its current content and keep every function, class, export and "
+        "URL route already there unless the task asks to remove it; add your code alongside. Write "
         "production-quality code with no TODO stubs."
     ),
     "repairer": (

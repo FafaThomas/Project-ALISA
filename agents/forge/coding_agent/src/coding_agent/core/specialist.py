@@ -214,6 +214,7 @@ class Specialist:
 
     def _do_coordinate(
         self, request: CodingRequest, board: Blackboard, builders: list[RoleSpec], changes: ChangeSet,
+        elsewhere: list[RoleSpec] | None = None,
     ) -> RoleOutput:
         """Division lead: split the division's work into owned work items."""
         roster = "\n".join(f"- {b.id}: {b.name} ({b.responsibility})" for b in builders)
@@ -223,6 +224,16 @@ class Specialist:
             f"## Files other divisions already produced this run\n{produced}",
             f"## Specialists you can assign (owner_role must be one of these ids)\n{roster}",
         ]
+        if elsewhere:
+            def division_name(role: RoleSpec) -> str:
+                division = self.tree.division_of(role)
+                return division.name if division else "-"
+            others = "\n".join(f"- {r.name} ({division_name(r)} division): {r.responsibility}" for r in elsewhere)
+            sections.append(
+                "## Other divisions building on this run\n"
+                f"{others}\n\nLeave every part of the request that falls under their responsibilities to them "
+                "(for example containers, Dockerfiles, deployment and CI to DevOps): do not create work items or "
+                "claim files for it. Plan only your division's part.")
         try:
             reply = self._ask(request, sections, query=request.task, as_lead=True)
         except LLMError as exc:
@@ -285,6 +296,11 @@ class Specialist:
         listing = "\n".join(f"- {p['path']} [{p['check']}]: {p['detail']}" for p in problems)
         files = sorted({p["path"] for p in problems})
         sections = [f"## Problems to fix\n{listing}", f"## Team decisions\n{board.render()}"]
+        for path in sorted({p["path"] for p in problems if p.get("check") == "removed-code"}):
+            before = changes.workspace.read_text(path)
+            if before is not None:
+                sections.append(f"## {path} before this run (restore what was dropped, merged with the new code)\n"
+                                f"```\n{before[:12000]}\n```")
         try:
             reply = self._ask(request, sections, query=listing, focus_files=files, reader=changes.current)
         except LLMError as exc:
@@ -365,8 +381,8 @@ class Specialist:
         return self._after(self._do_consult(request, board), "consult")
 
     def coordinate(self, request: CodingRequest, board: Blackboard, builders: list[RoleSpec],
-                   changes: ChangeSet) -> RoleOutput:
-        return self._after(self._do_coordinate(request, board, builders, changes), "coordinate")
+                   changes: ChangeSet, elsewhere: list[RoleSpec] | None = None) -> RoleOutput:
+        return self._after(self._do_coordinate(request, board, builders, changes, elsewhere), "coordinate")
 
     def build(self, request: CodingRequest, board: Blackboard, item: WorkItem, all_items: list[WorkItem],
               changes: ChangeSet) -> RoleOutput:

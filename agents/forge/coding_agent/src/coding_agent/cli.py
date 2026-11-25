@@ -60,18 +60,27 @@ def _print_event(event: dict) -> None:
     elif kind == "verification":
         state = "passed" if event["passed"] else f"{len(event['problems'])} problem(s)"
         print(f"  [files gate] {state}")
+    elif kind == "test_env":
+        if event.get("note"):
+            print(f"  [test env] {event['note']}")
+        if event.get("warning"):
+            print(f"  [test env] ! {event['warning']}")
     elif kind == "test_run":
         print("  [test run]")
         for r in event["results"]:
             if r["skipped"]:
                 status = f"skipped ({r['skipped']})"
+            elif r.get("unavailable"):
+                status = f"n/a ({r['unavailable']})"
             elif r["timed_out"]:
                 status = "HUNG"
             elif "Traceback (most recent call last)" in r["stderr"]:
                 status = "CRASHED"
+            elif r.get("reported"):
+                status = "ERRORS"
             else:
                 status = f"ok (exit {r['exit_code']})"
-            print(f"     {status:<14} {r['command']}")
+            print(f"     {status:<14} {r.get('ran_as') or r['command']}")
 
 
 def _summarize(report: RunReport) -> None:

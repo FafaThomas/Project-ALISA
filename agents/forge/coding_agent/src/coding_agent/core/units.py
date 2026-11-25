@@ -57,7 +57,7 @@ from .registry import PHASES, RoleSpec, Tree, UnitSpec
 from .selection import division_needs_lead, score_units
 from .specialist import Specialist
 from . import testrun
-from .verification import verify_files
+from .verification import SOFT_CHECKS, verify_files
 from .workspace import ChangeSet, Workspace, WorkspaceError
 
 LOGGER = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class Executor(Protocol):
 
     def consult(self, request: CodingRequest, board: Blackboard) -> RoleOutput: ...
     def coordinate(self, request: CodingRequest, board: Blackboard, builders: list[RoleSpec],
-                   changes: ChangeSet) -> RoleOutput: ...
+                   changes: ChangeSet, elsewhere: list[RoleSpec] | None = None) -> RoleOutput: ...
     def build(self, request: CodingRequest, board: Blackboard, item: WorkItem, all_items: list[WorkItem],
               changes: ChangeSet) -> RoleOutput: ...
     def repair(self, request: CodingRequest, problems: list[dict[str, str]], changes: ChangeSet,
@@ -120,6 +120,8 @@ class Session:
     test_commands: list[dict[str, str]] | None = None
     test_results: list = field(default_factory=list)
     test_warnings: list[str] = field(default_factory=list)
+    team_groups: dict[str, list[RoleSpec]] = field(default_factory=dict)
+    test_env_shown: tuple[str, str] = ("", "")
 
     def __post_init__(self) -> None:
         self.changes = ChangeSet(self.workspace)
@@ -217,8 +219,8 @@ class TeamExecutor:
         return outputs[0] if len(outputs) == 1 else merge_outputs(self.unit, self.unit.phase, outputs)
 
     def coordinate(self, request: CodingRequest, board: Blackboard, builders: list[RoleSpec],
-                   changes: ChangeSet) -> RoleOutput:
-        return self.local.coordinate(request, board, builders, changes)
+                   changes: ChangeSet, elsewhere: list[RoleSpec] | None = None) -> RoleOutput:
+        return self.local.coordinate(request, board, builders, changes, elsewhere)
 
     def build(self, request: CodingRequest, board: Blackboard, item: WorkItem, all_items: list[WorkItem],
               changes: ChangeSet) -> RoleOutput:
@@ -314,8 +316,9 @@ class RemoteExecutor:
     def consult(self, request, board):
         return self._invoke("consult", self.unit.phase, {}, board, self.session.changes)
 
-    def coordinate(self, request, board, builders, changes):
-        return self._invoke("coordinate", "build", {"builders": [b.path for b in builders]}, board, changes)
+    def coordinate(self, request, board, builders, changes, elsewhere=None):
+        return self._invoke("coordinate", "build", {"builders": [b.path for b in builders],
+                                                    "elsewhere": [r.path for r in elsewhere or []]}, board, changes)
 
     def build(self, request, board, item, all_items, changes):
         return self._invoke("build", "build", {"item": asdict(item), "all_items": [asdict(w) for w in all_items]},
@@ -352,7 +355,8 @@ def handle_invoke(tree: Tree, router: ModelRouter, payload: dict[str, Any]) -> d
         output = executor.consult(request, session.board)
     elif action == "coordinate":
         builders = [tree.get(p) for p in args.get("builders") or []]
-        output = executor.coordinate(request, session.board, builders, session.changes)
+        elsewhere = [tree.get(p) for p in args.get("elsewhere") or []]
+        output = executor.coordinate(request, session.board, builders, session.changes, elsewhere)
     elif action == "build":
         items = [work_item_from_dict(w) for w in args.get("all_items") or []]
         item = work_item_from_dict(args.get("item") or {})
@@ -404,7 +408,11 @@ class DivisionRunner:
         if session.level != "specialist" and lead_id and division_needs_lead(self.division, builders):
             lead = session.tree.by_id[lead_id]
             self._started(session, lead, "build", lead=True)
-            plan = session.executor(lead).coordinate(session.request, session.board, builders, session.changes)
+            # Builders from other divisions on this run: their work is left to them (Docker to DevOps, ...).
+            elsewhere = [r for division_id, members in session.team_groups.items() if division_id != self.division.id
+                         for r in members if r.kind == "builder"]
+            plan = session.executor(lead).coordinate(session.request, session.board, builders, session.changes,
+                                                     elsewhere)
             items = [i for i in plan.work_items if i.owner_role in {b.id for b in builders}]
             if not items:
                 plan.concerns.append("no usable work items; each specialist takes its part directly")
@@ -461,6 +469,7 @@ def group_by_division(tree: Tree, roles: list[RoleSpec], *, attach: bool) -> dic
 
 def run_phases(session: Session, groups: dict[str, list[RoleSpec]], max_repairs: int) -> None:
     """analyze -> plan -> design -> build -> files gate/repair -> review -> optional fix."""
+    session.team_groups = groups
     for phase in PHASES:
         if phase == "review":
             verify_and_repair(session, max_repairs)
@@ -508,7 +517,14 @@ def _check(session: Session, repairer: UnitSpec | None, test_mode: str) -> Verif
     if not session.test_commands:
         return verification
     seconds = testrun.timeout()
-    results = testrun.run_commands(session.changes, session.test_commands, seconds)
+    python_env = testrun.prepare_python(session.changes)
+    if python_env.note or python_env.warning:
+        if (python_env.note, python_env.warning) != session.test_env_shown:
+            session.emit({"event": "test_env", "note": python_env.note, "warning": python_env.warning})
+            session.test_env_shown = (python_env.note, python_env.warning)
+        if python_env.warning:
+            verification.checks.append(f"test environment: {python_env.warning}")
+    results = testrun.run_commands(session.changes, session.test_commands, seconds, python_env)
     session.test_results = results
     problems = testrun.problems_from(results, session.changes, seconds)
     failed = sum(r.failed for r in results)
@@ -536,13 +552,17 @@ def verify_and_repair(session: Session, max_repairs: int) -> None:
         session.record(output, repairer.division)
         verification = _check(session, repairer, test_mode)
         verification.checks.append(f"after repair attempt {attempt}")
-    if test_mode != "block":
-        # Test-run failures left after repairs are reported, not blocking: a planned command can be wrong too.
-        leftover = [p for p in verification.problems if p["check"] == "test-run"]
-        if leftover:
-            verification.problems = [p for p in verification.problems if p["check"] != "test-run"]
-            verification.passed = not verification.problems
-            session.test_warnings = [f"test run: {p['detail'].splitlines()[0]} (in {p['path']})" for p in leftover]
+    # Soft problems left after repairs are reported, not blocking: removing code may be what the task wants,
+    # and a planned test command can be wrong too (unless CODING_AGENT_TEST_RUN=block).
+    soft = set(SOFT_CHECKS) | ({"test-run"} if test_mode != "block" else set())
+    leftover = [p for p in verification.problems if p["check"] in soft]
+    if leftover:
+        verification.problems = [p for p in verification.problems if p["check"] not in soft]
+        verification.passed = not verification.problems
+        session.test_warnings = [
+            (f"test run: {p['detail'].splitlines()[0]} (in {p['path']})" if p["check"] == "test-run"
+             else f"{p['path']}: {p['detail'].split('. Keep')[0]}")
+            for p in leftover]
     session.verification = verification
 
 
@@ -560,6 +580,8 @@ def finish(session: Session, report: RunReport, *, remember: bool) -> RunReport:
     report.warnings += [f"{o.role} ({o.phase}): {c}" for o in session.outputs for c in o.concerns
                         if c.startswith("rejected file")]
     report.warnings += session.test_warnings
+    if session.test_env_shown[1]:
+        report.warnings.append(f"test run: dependencies not installed: {session.test_env_shown[1]}")
     report.test_run = [r.to_dict() for r in session.test_results]
     # A specialist whose model failed may still deliver (e.g. a reviewer's deterministic tools).
     empty = [o for o in failed if not (o.changes or o.findings or o.work_items or o.decisions)]

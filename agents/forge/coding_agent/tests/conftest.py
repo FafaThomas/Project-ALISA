@@ -99,3 +99,5 @@ def isolated_model_env(monkeypatch, tmp_path):
     monkeypatch.setenv("GEMINI_USAGE_FILE", str(tmp_path / "gemini_usage.json"))
     # Tests that exercise the Debugging Specialist's test run turn it on explicitly.
     monkeypatch.setenv("CODING_AGENT_TEST_RUN", "off")
+    monkeypatch.setenv("CODING_AGENT_TEST_ENV_DIR", str(tmp_path / "testrun-envs"))
+    monkeypatch.setenv("CODING_AGENT_TEST_DEPS", "off")
