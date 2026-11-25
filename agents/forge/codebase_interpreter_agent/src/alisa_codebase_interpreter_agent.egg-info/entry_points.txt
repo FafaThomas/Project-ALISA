@@ -1,2 +1,0 @@
-[console_scripts]
-codebase-interpreter = codebase_interpreter_agent.cli:main

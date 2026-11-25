@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alisa-coding-agent"
+version = "0.4.0"
+description = "ALISA Forge coding agent: a tree of units, each usable and servable on its own"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+coding-agent = "coding_agent.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Divisions and specialists are folders of Markdown (and optional tools.py),
+# not Python packages, so ship them as package data.
+[tool.setuptools.package-data]
+coding_agent = ["unit.md", "divisions/**/*.md", "divisions/**/*.py", "divisions/**/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
