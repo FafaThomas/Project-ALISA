@@ -530,12 +530,15 @@ Small models write plausible files but lose track of how files fit together. The
 parts with one right answer off the model, and give it facts instead of making it guess. None of
 them calls a model, and every fix is part of the proposal you approve, marked `(tools)`.
 
+**See [TOOLS.md](TOOLS.md) for the full tools reference, entry points, and how to add new tools.**
+
 | Tool | What it does |
 |---|---|
 | Facts (`core/projectfacts.py`) | reads layout, dependencies, Django routes and allowed methods, frontend API calls and environment variables from the code |
 | Checks (`core/checks.py`) | the gate checks above, for one run or the whole project |
 | Fixes (`core/autofix.py`) | adds missing packages to `requirements.txt` (known PyPI names only); creates or completes `package.json` with versions known to work together and the Vite scripts; creates a missing `manage.py`, `wsgi.py` or `asgi.py` from the settings; fixes a `manage.py` that passes `sys.argv[1:]`; adds imports that have one right answer and strips the run folder from imports (`backend.menu.models` -> `menu.models`); in Dockerfiles, `npm ci` without a lock file becomes `npm install` and a Vite build is copied from `dist/` |
 | Migrations (`testrun.generate_migrations`) | Django's `makemigrations` for the project's apps, in the sandbox |
+| Import check (`testrun.import_check`) | imports every project module in the sandbox to catch import-time failures |
 | Brief and changelog (`core/projectdocs.py`) | what one run leaves for the next |
 
 Everything else (route design, which side of an API mismatch is wrong, where a command should run)
