@@ -65,6 +65,34 @@ def _print_event(event: dict) -> None:
             print(f"  [test env] {event['note']}")
         if event.get("warning"):
             print(f"  [test env] ! {event['warning']}")
+    elif kind == "brief":
+        parts = [f"{event['open_issues']} open issue(s) found in the code"]
+        if event.get("requirements"):
+            parts.append(f"{event['requirements']} requirement(s) from earlier runs")
+        if event.get("left_open"):
+            parts.append(f"{event['left_open']} item(s) the last run left open")
+        if event.get("history"):
+            parts.append("recent CHANGELOG.md entries")
+        print(f"[brief] {', '.join(parts)}  (leads and analysts see the details)")
+    elif kind == "tool_fix":
+        label = "migrations" if event.get("phase") == "migrations" else "tools"
+        for fix in event["fixes"]:
+            print(f"  [{label}] {fix['action']:<6} {fix['path']}: {fix['reason']}")
+    elif kind == "self_check":
+        problems = event["problems"]
+        print(f"  [self-check] {_name(event['role'])}: {len(problems)} problem(s) in its own files; "
+              "it fixes them before moving on")
+        for p in problems[:4]:
+            print(f"     - {p['path']} [{p['check']}] {p['detail'][:140]}")
+    elif kind == "import_check":
+        failures = event["failures"]
+        print(f"  [imports] {event['modules']} module(s) imported, {len(failures)} failed"
+              + (f" ({event['note']})" if event.get("note") else ""))
+        for failure in failures:
+            older = "" if failure["changed"] else "  (code this run did not change)"
+            print(f"     FAILED  {failure['path']}: {failure['error'][:150]}{older}")
+    elif kind == "test_note":
+        print(f"  [test run] ! {event['note']}")
     elif kind == "test_run":
         print("  [test run]")
         for r in event["results"]:
@@ -98,6 +126,8 @@ def _summarize(report: RunReport) -> None:
             print(f"  - [{f.severity}] {f.file or '-'}: {f.issue} ({_name(f.role)})")
     for warning in report.warnings:
         print(f"warning: {warning}")
+    for note in report.notes:
+        print(f"note: {note}")
     if report.error:
         print(f"error: {report.error}")
     print(f"artifacts: {report.artifacts_dir}")
@@ -135,6 +165,66 @@ def cmd_run(args: argparse.Namespace) -> int:
     else:
         _summarize(report)
     return 0 if report.status in ("completed", "proposed") else 1
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """The project's facts and open issues, read from the code (no model, nothing written)."""
+    from .core import autofix, checks, projectdocs
+    from .core.verification import SOFT_CHECKS
+
+    workspace = Workspace(args.workspace)
+    if not workspace.exists:
+        raise ValueError(f"workspace does not exist: {args.workspace}")
+    view = projectdocs.workspace_view(workspace)
+    if args.facts:
+        print(projectdocs.facts_markdown(view) or "(nothing recognised)")
+        print()
+    problems = checks.project_problems(view)
+    for problem in problems:
+        print(f"- {problem['path']} [{problem['check']}] {problem['detail']}")
+    hard = [p for p in problems if p["check"] not in SOFT_CHECKS]
+    fixable = autofix.deterministic_fixes(projectdocs.workspace_view(workspace), None) if problems else []
+    print(f"\n{len(problems)} open issue(s), {len(hard)} blocking"
+          + (f"; `coding-agent fix` can fix {len(fixable)} file(s) without a model" if fixable else
+             "; none of them has a fix the tools can make without a model" if problems else ""))
+    return 1 if hard else 0
+
+
+def cmd_fix(args: argparse.Namespace) -> int:
+    """Apply the fixes the team's tools make without a model, to the whole project, after approval."""
+    from datetime import datetime, timezone
+
+    from .core import autofix, projectdocs
+    from .core.models import FileChange, RunReport
+    from .core.workspace import ChangeSet
+
+    workspace = Workspace(args.workspace)
+    if not workspace.exists:
+        raise ValueError(f"workspace does not exist: {args.workspace}")
+    fixes = autofix.deterministic_fixes(projectdocs.workspace_view(workspace), None)
+    if not fixes:
+        print("Nothing the tools can fix without a model. `coding-agent check` lists what is left.")
+        return 0
+    changes = ChangeSet(workspace)
+    for fix in fixes:
+        change = changes.add(FileChange(fix.path, "modify", fix.content, author_role=autofix.TOOL_ROLE,
+                                        work_item_id=autofix.TOOL_ITEM))
+        print(f"  {change.action:<6} {change.path}: {fix.reason}")
+    if not args.yes:
+        if input("\nWrite these changes? Type 'yes' to approve: ").strip() != "yes":
+            print("Not applied.")
+            return 1
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + "tools"
+    run_dir = workspace.agent_dir / "runs" / run_id
+    workspace.apply(changes.changes(), run_dir)
+    report = RunReport(run_id=run_id, status="completed", task="Fix what the tools can fix without a model "
+                       "(coding-agent fix)", workspace=str(workspace.root), invocation_source="cli",
+                       context_strategy="none", team=[autofix.TOOL_ROLE], changes=changes.changes(),
+                       artifacts_dir=str(run_dir))
+    for note in projectdocs.record_run(workspace, report, run_dir):
+        print(f"note: {note}")
+    print(f"Written. Backups of changed files: {run_dir / 'backup'}")
+    return 0
 
 
 def cmd_team(args: argparse.Namespace) -> int:
@@ -240,6 +330,16 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--propose-only", action="store_true", help="never write; keep proposals in the run folder")
     run.add_argument("--json", action="store_true")
     run.set_defaults(func=cmd_run)
+
+    check = sub.add_parser("check", help="list the project's open issues, read from the code (no model)")
+    check.add_argument("workspace")
+    check.add_argument("--facts", action="store_true", help="also print the facts: layout, dependencies, routes ...")
+    check.set_defaults(func=cmd_check)
+
+    fix = sub.add_parser("fix", help="fix what the tools can fix without a model, after approval")
+    fix.add_argument("workspace")
+    fix.add_argument("--yes", action="store_true", help="write without asking")
+    fix.set_defaults(func=cmd_fix)
 
     team = sub.add_parser("team", help="preview the heuristic team for a task (no model)")
     team.add_argument("workspace")

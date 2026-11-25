@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .core.context import build_context_provider
+from .core.projectdocs import record_run
 from .core.llm import LLMClient, ModelRouter
 from .core.models import (
     CodingRequest, InvocationContext, InvocationSource, KnowledgeRetriever, RoleOutput, RunReport,
@@ -206,6 +207,7 @@ class CodingAgent(Unit):
         run_dir = Path(report.artifacts_dir)
         workspace.apply(report.changes, run_dir)
         report.status = "completed"
+        report.notes += record_run(workspace, report, run_dir)
         if self.runtime.remember_runs:
             decisions = [d for o in report.outputs for d in o.decisions]
             request = CodingRequest(task=report.task, workspace=report.workspace)

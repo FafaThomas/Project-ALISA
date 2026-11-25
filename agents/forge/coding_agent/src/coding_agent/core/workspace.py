@@ -16,6 +16,16 @@ IGNORED_DIRS = frozenset({
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".idea", ".vscode", "dist", "build",
     "target", "bin", "obj", ".next", ".gradle", "coverage",
 })
+# Copies of old work kept next to the project; reading them as current code misleads the team.
+BACKUP_DIR_NAMES = frozenset({"backup", "backups", "_backup", "old", "_old"})
+BACKUP_DIR_SUFFIXES = (".bak", ".backup", ".old", ".orig", ".egg-info")
+
+
+def is_ignored_dir(name: str) -> bool:
+    lower = name.lower()
+    return name in IGNORED_DIRS or lower in BACKUP_DIR_NAMES or lower.endswith(BACKUP_DIR_SUFFIXES)
+
+
 SECRET_NAMES = frozenset({".env", "id_rsa", "id_ed25519", "credentials.json", "secrets.json"})
 SECRET_SUFFIXES = (".pem", ".key", ".pfx", ".p12")
 MAX_READ_BYTES = 400_000
@@ -99,7 +109,7 @@ class Workspace:
                 continue
             for entry in entries:
                 if entry.is_dir():
-                    if entry.name not in IGNORED_DIRS and not entry.name.endswith(".egg-info"):
+                    if not is_ignored_dir(entry.name):
                         stack.append(entry)
                 elif entry.is_file():
                     rel = PurePosixPath(entry.relative_to(self.root).as_posix())
@@ -136,8 +146,9 @@ class Workspace:
         return written
 
 
-# Work-item ids that may change any file: repair rounds fix whatever the files gate reports.
-UNOWNED_WRITERS = frozenset({"repair", ""})
+# Work-item ids that may change any file: repair rounds fix whatever the files gate reports, and the
+# team's tools (autofix.py) fix dependency lists, boilerplate and imports wherever they are.
+UNOWNED_WRITERS = frozenset({"repair", "tools", ""})
 
 
 class ChangeSet:
@@ -161,6 +172,10 @@ class ChangeSet:
         except WorkspaceError:
             return
         self._owners.setdefault(rel, (work_item_id, owner_role))
+
+    def owned(self) -> dict[str, tuple[str, str]]:
+        """Every claimed path with its (work item id, owner role)."""
+        return dict(self._owners)
 
     def owner(self, path: str) -> tuple[str, str] | None:
         try:
@@ -197,6 +212,13 @@ class ChangeSet:
         if change is not None:
             return None if change.action == "delete" else change.content
         return self.workspace.read_text(rel)
+
+    def discard(self, path: str) -> None:
+        """Drop a proposed change (the file goes back to what the workspace has)."""
+        try:
+            self._changes.pop(self.workspace.normalize(path), None)
+        except WorkspaceError:
+            pass
 
     def paths(self) -> list[str]:
         return list(self._changes)

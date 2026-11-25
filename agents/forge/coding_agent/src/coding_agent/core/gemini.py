@@ -29,7 +29,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .env import env_value, load_local_env
-from .llm import LLMError, ProviderUnavailableError, RateLimitError, _positive_env, parse_json_object
+from .llm import (
+    LLMError, OutputLimitError, ProviderUnavailableError, RateLimitError, _positive_env, parse_json_object,
+)
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -131,7 +133,7 @@ class GeminiClient:
         text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
         reason = candidate.get("finishReason")
         if reason == "MAX_TOKENS":
-            raise LLMError(f"Gemini {self.model} hit its output limit ({self.max_output_tokens}) before finishing")
+            raise OutputLimitError(f"Gemini {self.model} hit its output limit ({self.max_output_tokens}) before finishing")
         if reason not in (None, "STOP") and not text.strip():
             raise LLMError(f"Gemini {self.model} stopped without an answer ({reason})")
         LOGGER.info("Gemini %s finished in %.1fs (prompt_chars=%d, response_chars=%d)",

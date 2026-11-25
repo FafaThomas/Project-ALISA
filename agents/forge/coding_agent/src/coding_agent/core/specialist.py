@@ -24,8 +24,10 @@ from typing import Any
 from .blackboard import Blackboard
 from .context.base import ContextProvider
 from .hooks import load_hooks
-from .llm import LLMError, ModelRouter
+from .llm import LLMError, ModelRouter, OutputLimitError
 from .models import CodingRequest, FileChange, Finding, RoleOutput, WorkItem
+from .projectdocs import facts_for_files, requirements
+from .projectfacts import ProjectView
 from .prompts import (
     SCHEMA_BY_KIND, TEST_PLAN_INSTRUCTIONS, TEST_PLAN_SCHEMA, WORK_ITEMS_SCHEMA, system_prompt,
 )
@@ -34,6 +36,8 @@ from .registry import RoleSpec, Tree
 from .workspace import ChangeSet, WorkspaceError
 
 LOGGER = logging.getLogger(__name__)
+# A work item (or repair) touching this many files is written one file per model call.
+SPLIT_AT = 3
 # Roughly 3 characters per token leaves room for output in a 16k-token window.
 DEFAULT_PROMPT_BUDGET = 36_000
 SEVERITIES = ("info", "low", "medium", "high", "critical")
@@ -80,6 +84,16 @@ def _finding(role: str, raw: Any) -> Finding | None:
         file=str(raw.get("file") or "").strip(),
         suggestion=str(raw.get("suggestion") or "").strip(),
     )
+
+
+def project_facts(changes: ChangeSet, files: list[str]) -> str:
+    """Requirements from earlier runs, and facts read from the code about the project around ``files``
+    (routes, dependencies, known problems)."""
+    try:
+        return facts_for_files(ProjectView.of(changes), files, required=requirements(changes.workspace))
+    except Exception:  # a parsing surprise must never stop a build
+        LOGGER.warning("could not collect project facts for %s", files, exc_info=True)
+        return ""
 
 
 def produced_interfaces(changes: ChangeSet, exclude: set[str], budget: int = 5000) -> str:
@@ -179,8 +193,10 @@ class Specialist:
         used = getattr(client, "used_model", None)
         if used and used != client.model:  # a hosted model was unavailable and a local one answered
             self.last_model = used
-            self.last_model_source = (f"{source}; {client.model} unavailable, fell back to the "
-                                      f"{tier} default ({getattr(client, 'fallback_reason', '')[:80]})")
+            hosted = getattr(client, "fallback_kind", "") == "hosted"
+            target = f"the hosted fallback {used}" if hosted else f"the {tier} default"
+            self.last_model_source = (f"{source}; {client.model} unavailable, fell back to "
+                                      f"{target} ({getattr(client, 'fallback_reason', '')[:80]})")
         return reply
 
     def _output(self, phase: str, reply: dict[str, Any]) -> RoleOutput:
@@ -224,6 +240,12 @@ class Specialist:
             f"## Files other divisions already produced this run\n{produced}",
             f"## Specialists you can assign (owner_role must be one of these ids)\n{roster}",
         ]
+        brief = getattr(self.provider, "project_brief", None)
+        if callable(brief) and self.role.kind not in ("analyst", "planner", "designer", "coordinator"):
+            text = brief().text  # coordinators already get it through their context
+            if text:
+                sections.insert(0, "## Project brief (read from the code; issues and history from earlier runs)\n"
+                                + text[:9000])
         if elsewhere:
             def division_name(role: RoleSpec) -> str:
                 division = self.tree.division_of(role)
@@ -267,45 +289,114 @@ class Specialist:
         self, request: CodingRequest, board: Blackboard, item: WorkItem, all_items: list[WorkItem],
         changes: ChangeSet,
     ) -> RoleOutput:
-        """Write the files for one work item."""
+        """Write the files for one work item.
+
+        Items with SPLIT_AT or more files are written one file per call, and so is any item whose
+        single answer ran out of output tokens: a small model cannot fit several pages in one reply.
+        """
+        if len(item.files) >= SPLIT_AT:
+            return self._build_per_file(request, board, item, all_items, changes)
+        try:
+            reply = self._build_call(request, board, item, all_items, changes)
+        except OutputLimitError as exc:
+            if len(item.files) > 1:
+                LOGGER.warning("%s ran out of output on %s; writing its files one at a time", self.role.id, item.id)
+                return self._build_per_file(request, board, item, all_items, changes)
+            return self._failed("build", exc)
+        except LLMError as exc:
+            return self._failed("build", exc)
+        return self._collect_files("build", reply, changes, item.id)
+
+    def _build_call(self, request: CodingRequest, board: Blackboard, item: WorkItem, all_items: list[WorkItem],
+                    changes: ChangeSet, only: str | None = None) -> dict[str, Any]:
         others = "\n".join(
             f"- {w.id} ({self.tree.by_id[w.owner_role].name if w.owner_role in self.tree.by_id else w.owner_role}): "
             f"{w.title} [{', '.join(w.files)}]"
             for w in all_items if w is not item
         ) or "(none)"
-        produced = produced_interfaces(changes, exclude=set(item.files))
+        produced = produced_interfaces(changes, exclude={only} if only else set(item.files))
+        scope = (f"Files you own: {', '.join(item.files) or 'choose sensible paths'}. Write only these, or new "
+                 "files no work item owns; changes to files owned by teammates' work items are rejected.")
+        if only:
+            scope += (f"\n\nIn THIS response write only {only}, completely. The other files of your work item are "
+                      "written in separate responses; import from them by the names the description gives.")
         sections = [
-            f"## Your work item {item.id}: {item.title}\n{item.description}\n\n"
-            f"Files you own: {', '.join(item.files) or 'choose sensible paths'}. Write only these, or new files "
-            "no work item owns; changes to files owned by teammates' work items are rejected.",
+            f"## Your work item {item.id}: {item.title}\n{item.description}\n\n{scope}",
             f"## Other work items (owned by teammates)\n{others}",
             f"## Files teammates already produced this run (use these exact names when you import them)\n"
             f"{produced}",
-            f"## Team decisions\n{board.render()}",
         ]
+        facts = project_facts(changes, [only] if only else item.files)
+        if facts:
+            sections.append(f"## Project facts (read from the code, not guessed)\n{facts}")
+        sections.append(f"## Team decisions\n{board.render()}")
         query = f"{request.task}\n{item.title}\n{item.description}"
-        try:
-            reply = self._ask(request, sections, query=query, focus_files=item.files, reader=changes.current)
-        except LLMError as exc:
-            return self._failed("build", exc)
-        return self._collect_files("build", reply, changes, item.id)
+        return self._ask(request, sections, query=query, focus_files=[only] if only else item.files,
+                         reader=changes.current)
+
+    def _build_per_file(self, request: CodingRequest, board: Blackboard, item: WorkItem,
+                        all_items: list[WorkItem], changes: ChangeSet) -> RoleOutput:
+        parts: list[RoleOutput] = []
+        for path in item.files:
+            try:
+                reply = self._build_call(request, board, item, all_items, changes, only=path)
+            except LLMError as exc:
+                parts.append(self._failed("build", RuntimeError(f"{path}: {exc}")))
+                continue
+            parts.append(self._collect_files("build", reply, changes, item.id))
+        return merge_parts(self.role.id, "build", parts)
 
     def _do_repair(
         self, request: CodingRequest, problems: list[dict[str, str]], changes: ChangeSet, board: Blackboard,
     ) -> RoleOutput:
+        files = sorted({p["path"] for p in problems})
+        if len(files) >= SPLIT_AT:
+            return self._repair_per_file(request, problems, changes, board)
+        try:
+            reply = self._repair_call(request, problems, changes, board)
+        except OutputLimitError as exc:
+            if len(files) > 1:
+                LOGGER.warning("%s ran out of output repairing %d files; repairing one at a time",
+                               self.role.id, len(files))
+                return self._repair_per_file(request, problems, changes, board)
+            return self._failed("repair", exc)
+        except LLMError as exc:
+            return self._failed("repair", exc)
+        return self._collect_files("repair", reply, changes, "repair")
+
+    def _repair_per_file(self, request: CodingRequest, problems: list[dict[str, str]], changes: ChangeSet,
+                         board: Blackboard) -> RoleOutput:
+        parts: list[RoleOutput] = []
+        for path in sorted({p["path"] for p in problems}):
+            mine = [p for p in problems if p["path"] == path]
+            try:
+                reply = self._repair_call(request, mine, changes, board, others=len(problems) - len(mine))
+            except LLMError as exc:
+                parts.append(self._failed("repair", RuntimeError(f"{path}: {exc}")))
+                continue
+            parts.append(self._collect_files("repair", reply, changes, "repair"))
+        return merge_parts(self.role.id, "repair", parts)
+
+    def _repair_call(self, request: CodingRequest, problems: list[dict[str, str]], changes: ChangeSet,
+                     board: Blackboard, others: int = 0) -> dict[str, Any]:
         listing = "\n".join(f"- {p['path']} [{p['check']}]: {p['detail']}" for p in problems)
         files = sorted({p["path"] for p in problems})
-        sections = [f"## Problems to fix\n{listing}", f"## Team decisions\n{board.render()}"]
+        note = (f"\n\nIn THIS response write only {', '.join(files)}, completely. {others} problem(s) in other "
+                "files are fixed in separate responses." if others else "")
+        sections = [f"## Problems to fix\n{listing}{note}",
+                    "## Project files written this run\n" + produced_interfaces(changes, exclude=set(files))]
+        facts = project_facts(changes, files)
+        if facts:
+            sections.append(f"## Project facts (read from the code, not guessed)\n{facts}")
+        sections.append(f"## Team decisions\n{board.render()}")
         for path in sorted({p["path"] for p in problems if p.get("check") == "removed-code"}):
             before = changes.workspace.read_text(path)
             if before is not None:
                 sections.append(f"## {path} before this run (restore what was dropped, merged with the new code)\n"
                                 f"```\n{before[:12000]}\n```")
-        try:
-            reply = self._ask(request, sections, query=listing, focus_files=files, reader=changes.current)
-        except LLMError as exc:
-            return self._failed("repair", exc)
-        return self._collect_files("repair", reply, changes, "repair")
+        # Also show the files that point at a problem file (settings.py for a missing wsgi.py).
+        related = sorted({p["related"] for p in problems if p.get("related")} - set(files))
+        return self._ask(request, sections, query=listing, focus_files=files + related, reader=changes.current)
 
     def _do_review(
         self, request: CodingRequest, board: Blackboard, subject: list[tuple[str, str, str]], *,
@@ -338,6 +429,7 @@ class Specialist:
     def _collect_files(self, phase: str, reply: dict[str, Any], changes: ChangeSet, work_item: str) -> RoleOutput:
         output = self._output(phase, reply)
         output.decisions += _str_list(reply.get("notes"))
+        foreign: list[str] = []
         for raw in reply.get("files") or []:
             if not isinstance(raw, dict):
                 continue
@@ -351,10 +443,25 @@ class Specialist:
                     content=_strip_fence(content), author_role=self.role.id, work_item_id=work_item,
                 ))
             except WorkspaceError as exc:
-                output.concerns.append(f"rejected file: {exc}")
+                if " belongs to work item " in str(exc):
+                    foreign.append(str(raw.get("path") or ""))
+                else:
+                    output.concerns.append(f"rejected file: {exc}")
                 continue
             output.changes.append(change)
+        if foreign:  # one line, not one per file
+            output.concerns.append(f"rejected {len(foreign)} file(s) owned by other work items: {', '.join(foreign)}")
         return output
+
+    def fix_own(self, request: CodingRequest, board: Blackboard, item: WorkItem, problems: list[dict[str, str]],
+                changes: ChangeSet) -> RoleOutput:
+        """Self-check: the builder fixes problems found in the files it just wrote. Ownership still applies:
+        it can change its own work item's files (and unclaimed ones), not teammates'."""
+        try:
+            reply = self._repair_call(request, problems, changes, board)
+        except LLMError as exc:
+            return self._after(self._failed("self-check", exc), "repair")
+        return self._after(self._collect_files("self-check", reply, changes, item.id), "repair")
 
     def plan_test_run(self, request: CodingRequest, changes: ChangeSet) -> tuple[list[dict[str, str]], RoleOutput]:
         """Commands that exercise the program the team wrote (run by core/testrun.py)."""
@@ -395,6 +502,25 @@ class Specialist:
     def review(self, request: CodingRequest, board: Blackboard, subject: list[tuple[str, str, str]], *,
                limit: int = 6000, label: str = "Proposed changes") -> RoleOutput:
         return self._after(self._do_review(request, board, subject, limit=limit, label=label), "review")
+
+
+def merge_parts(role: str, phase: str, parts: list[RoleOutput]) -> RoleOutput:
+    """One output from several calls of the same specialist (a work item written file by file)."""
+    merged = RoleOutput(role=role, phase=phase, summary=" ".join(p.summary for p in parts if p.summary))
+    for part in parts:
+        merged.decisions += part.decisions
+        merged.concerns += part.concerns
+        merged.changes += part.changes
+        for key, value in part.tokens.items():
+            merged.tokens[key] = merged.tokens.get(key, 0) + value
+        if part.model:
+            merged.model, merged.model_source = part.model, part.model_source
+    failed = [p.error for p in parts if p.error]
+    if failed and len(failed) == len(parts):
+        merged.error = "; ".join(failed)[:600]
+    else:
+        merged.concerns += [f"failed: {e}" for e in failed]
+    return merged
 
 
 _FENCE = re.compile(r"^```[\w.+-]*\n(.*)\n```\s*$", re.DOTALL)

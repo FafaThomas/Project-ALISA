@@ -44,20 +44,21 @@ from typing import Any, Callable, Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from . import autofix, projectdocs, testrun
 from .blackboard import Blackboard
 from .context import build_context_provider
 from .context.base import ContextProvider
 from .llm import ModelRouter
 from .models import (
-    CodingRequest, Finding, InvocationContext, InvocationSource, RoleOutput, RunReport,
+    CodingRequest, FileChange, Finding, InvocationContext, InvocationSource, RoleOutput, RunReport,
     VerificationResult, WorkItem, file_change_from_dict, request_to_dict, role_output_from_dict,
     work_item_from_dict,
 )
+from .projectfacts import ProjectView
 from .registry import PHASES, RoleSpec, Tree, UnitSpec
 from .selection import division_needs_lead, score_units
 from .specialist import Specialist
-from . import testrun
-from .verification import SOFT_CHECKS, verify_files
+from .verification import SOFT_CHECKS, self_check_problems, verify_files
 from .workspace import ChangeSet, Workspace, WorkspaceError
 
 LOGGER = logging.getLogger(__name__)
@@ -122,6 +123,11 @@ class Session:
     test_warnings: list[str] = field(default_factory=list)
     team_groups: dict[str, list[RoleSpec]] = field(default_factory=dict)
     test_env_shown: tuple[str, str] = ("", "")
+    tool_notes: list[str] = field(default_factory=list)       # fixes the tools made (autofix.py)
+    test_notes: list[str] = field(default_factory=list)       # why the test run did not (fully) run
+    import_notes: list[str] = field(default_factory=list)     # modules failing to import in code the run left alone
+    plan_failures: list[str] = field(default_factory=list)    # leads that could not produce a plan
+    migrations: set[str] = field(default_factory=set)         # migration files generated this run
 
     def __post_init__(self) -> None:
         self.changes = ChangeSet(self.workspace)
@@ -148,6 +154,7 @@ class Session:
             run_id=self.run_id, status="failed", task=self.request.task, workspace=str(self.workspace.root),
             invocation_source=self.invocation.source.value, context_strategy=self.provider.strategy,
             team=[], unit_level=self.level, unit_id=self.unit_id, artifacts_dir=str(self.run_dir),
+            constraints=list(self.request.constraints), acceptance_criteria=list(self.request.acceptance_criteria),
         )
 
     def executor(self, unit: UnitSpec) -> Executor:
@@ -168,6 +175,51 @@ class Session:
             "summary": output.summary, "error": output.error, "files": [c.path for c in output.changes],
             "model": output.model, "model_source": output.model_source,
         })
+
+    def note_test(self, note: str) -> None:
+        if note not in self.test_notes:
+            self.test_notes.append(note)
+            self.emit({"event": "test_note", "note": note})
+
+    def add_tool_changes(self, files: list[tuple[str, str, str]], phase: str = "tools") -> list[str]:
+        """Record fixes made without a model: (path, content, reason). Returns the paths that changed."""
+        output = RoleOutput(role=autofix.TOOL_ROLE, phase=phase, summary="")
+        reasons = []
+        for path, content, reason in files:
+            if self.changes.current(path) == content:
+                continue
+            try:
+                change = self.changes.add(FileChange(path, "modify", content, author_role=autofix.TOOL_ROLE,
+                                                     work_item_id=autofix.TOOL_ITEM))
+            except WorkspaceError as exc:
+                output.concerns.append(f"rejected file: {exc}")
+                continue
+            output.changes.append(change)
+            reasons.append({"path": change.path, "action": change.action, "reason": reason})
+            self.tool_notes.append(f"{change.path}: {reason}")
+        if reasons:
+            output.summary = "Fixed without a model: " + "; ".join(f"{r['path']} ({r['reason']})" for r in reasons)
+            self.outputs.append(output)
+            self.board.post(output)
+            self.emit({"event": "tool_fix", "phase": phase, "fixes": reasons})
+        return [r["path"] for r in reasons]
+
+
+def apply_tool_fixes(session: Session, paths: list[str] | None = None) -> list[str]:
+    """The team's tools fix what has one right answer (autofix.py), before any model is asked.
+
+    ``paths``: only add missing imports to these files (a builder's own); dependency lists, Django
+    boilerplate and Dockerfile fixes are made for every file the run changed.
+    """
+    view = ProjectView.of(session.changes)
+    changed = set(session.changes.paths())
+    if not changed:
+        return []
+    if paths is not None:
+        fixes = autofix.import_fixes(view, [p for p in paths if p.endswith(".py")])
+    else:
+        fixes = autofix.deterministic_fixes(view, changed)
+    return session.add_tool_changes([(f.path, f.content, f.reason) for f in fixes])
 
 
 # --------------------------------------------------------------------- teams
@@ -413,14 +465,35 @@ class DivisionRunner:
                          for r in members if r.kind == "builder"]
             plan = session.executor(lead).coordinate(session.request, session.board, builders, session.changes,
                                                      elsewhere)
+            if plan.error and not plan.work_items:
+                # One more try: a model can fail to produce valid JSON once and succeed the next time.
+                session.record(plan, self.division.id)
+                self._started(session, lead, "build", lead=True, retry=True)
+                plan = session.executor(lead).coordinate(session.request, session.board, builders, session.changes,
+                                                         elsewhere)
             items = [i for i in plan.work_items if i.owner_role in {b.id for b in builders}]
+            if not items and plan.error:
+                # Improvising without a plan put the wrong specialist on the wrong files in real runs: stop instead.
+                session.plan_failures.append(f"{lead.name} ({self.division.name}): {plan.error[:200]}")
+                session.record(plan, self.division.id)
+                return
+            if not items and elsewhere:
+                # An empty plan while other divisions build is an answer: "this is their part, not ours".
+                plan.concerns.append("no work items: the lead left this request to the other divisions on this run")
+                session.record(plan, self.division.id)
+                return
             if not items:
                 plan.concerns.append("no usable work items; each specialist takes its part directly")
             session.record(plan, self.division.id)
         if not items:
+            owned = sorted(session.changes.owned())
+            taken_note = (f" These files already belong to other work items and you may not change them: "
+                          f"{', '.join(owned[:40])}." if owned else "")
             items = [
                 WorkItem(f"{self.division.id}-{b.id}", f"{b.name}: {self.division.name} part of the request",
-                         b.id, f"Deliver the part of the request your role is responsible for ({b.responsibility}).")
+                         b.id, f"Deliver the part of the request your role is responsible for ({b.responsibility})."
+                               f"{taken_note} If no part of the request falls under your responsibility, return an "
+                               "empty files list: that is a valid answer.")
                 for b in builders
             ]
         taken = {w.id for w in session.work_items}
@@ -434,8 +507,28 @@ class DivisionRunner:
         for item in items:
             role = session.tree.by_id[item.owner_role]
             self._started(session, role, "build", work_item=item.id)
-            output = session.executor(role).build(session.request, session.board, item, items, session.changes)
+            executor = session.executor(role)
+            output = executor.build(session.request, session.board, item, items, session.changes)
             session.record(output, self.division.id)
+            if isinstance(executor, Specialist) and output.changes and not output.error:
+                self._self_check(session, executor, role, item, [c.path for c in output.changes])
+
+    def _self_check(self, session: Session, executor: Specialist, role: RoleSpec, item: WorkItem,
+                    paths: list[str]) -> None:
+        """Check a builder's files as soon as they are written; the builder fixes its own mistakes first."""
+        apply_tool_fixes(session, paths)  # missing imports with one right answer: no model needed
+        rounds = self_check_rounds()
+        for _ in range(rounds):
+            problems = self_check_problems(session.changes, paths)
+            if not problems:
+                return
+            session.emit({"event": "self_check", "role": role.id, "work_item": item.id, "problems": problems})
+            self._started(session, role, "self-check", work_item=item.id)
+            fixed = executor.fix_own(session.request, session.board, item, problems, session.changes)
+            session.record(fixed, self.division.id)
+            if fixed.error or not fixed.changes:
+                return
+            apply_tool_fixes(session, paths)
 
     def _review(self, session: Session, members: list[RoleSpec]) -> None:
         reviewers = [m for m in members if m.kind == "reviewer"]
@@ -455,6 +548,18 @@ class DivisionRunner:
             session.findings.extend(output.findings)
 
 
+def self_check_rounds() -> int:
+    """``CODING_AGENT_SELF_CHECK``: how many times a builder may fix its own files (default 1, 0 = off)."""
+    from .env import env_value, load_local_env
+
+    load_local_env()
+    raw = env_value("CODING_AGENT_SELF_CHECK")
+    try:
+        return max(0, int(raw)) if raw not in (None, "") else 1
+    except ValueError:
+        return 1
+
+
 # -------------------------------------------------------------------- phases
 def group_by_division(tree: Tree, roles: list[RoleSpec], *, attach: bool) -> dict[str, list[RoleSpec]]:
     """Group roles by division, in division order, applying the agent's attachments."""
@@ -470,6 +575,12 @@ def group_by_division(tree: Tree, roles: list[RoleSpec], *, attach: bool) -> dic
 def run_phases(session: Session, groups: dict[str, list[RoleSpec]], max_repairs: int) -> None:
     """analyze -> plan -> design -> build -> files gate/repair -> review -> optional fix."""
     session.team_groups = groups
+    project_brief = getattr(session.provider, "project_brief", None)
+    if callable(project_brief):
+        summary = project_brief()
+        if summary.text:
+            session.emit({"event": "brief", "open_issues": summary.open_issues, "left_open": summary.left_open,
+                          "history": summary.history, "requirements": summary.requirements})
     for phase in PHASES:
         if phase == "review":
             verify_and_repair(session, max_repairs)
@@ -503,18 +614,14 @@ def _active(session: Session, members: list[RoleSpec], phase: str) -> bool:
 
 
 def _check(session: Session, repairer: UnitSpec | None, test_mode: str) -> VerificationResult:
-    """Files gate, then (when it passes) the Debugging Specialist's test run."""
+    """The tools' fixes, the files gate, then (when it passes) migrations and the Debugging Specialist's test run."""
+    apply_tool_fixes(session)
     verification = verify_files(session.changes, session.work_items)
     session.emit({"event": "verification", "passed": verification.passed, "problems": verification.problems})
-    if not verification.passed or test_mode == "off" or repairer is None or not testrun.has_python(session.changes):
+    if not verification.passed or repairer is None or not testrun.has_python(session.changes):
         return verification
-    if session.test_commands is None:
-        session.emit({"event": "role_started", "division": repairer.division, "role": repairer.id,
-                      "phase": "test-plan"})
-        commands, output = session.specialist(repairer).plan_test_run(session.request, session.changes)
-        session.record(output, repairer.division)
-        session.test_commands = commands or testrun.fallback_commands(session.changes)
-    if not session.test_commands:
+    if test_mode == "off":
+        session.note_test("test run skipped: CODING_AGENT_TEST_RUN=off, so the generated code was never run")
         return verification
     seconds = testrun.timeout()
     python_env = testrun.prepare_python(session.changes)
@@ -524,16 +631,86 @@ def _check(session: Session, repairer: UnitSpec | None, test_mode: str) -> Verif
             session.test_env_shown = (python_env.note, python_env.warning)
         if python_env.warning:
             verification.checks.append(f"test environment: {python_env.warning}")
+    if python_env.problem:
+        # The requirements cannot be installed at all: fix that first; commands would only fail on imports.
+        verification.problems.append({"path": python_env.problem_path, "check": "test-run",
+                                      "detail": python_env.problem})
+        verification.passed = False
+        return verification
+    _generate_migrations(session, python_env, verification)
+    _import_check(session, python_env, verification, seconds)
+    if session.test_commands is None:
+        session.emit({"event": "role_started", "division": repairer.division, "role": repairer.id,
+                      "phase": "test-plan"})
+        commands, output = session.specialist(repairer).plan_test_run(session.request, session.changes)
+        session.record(output, repairer.division)
+        session.test_commands = commands or testrun.fallback_commands(session.changes)
+    if not session.test_commands:
+        session.note_test("test run: no commands were planned, so only the import check ran the code")
+        verification.passed = not verification.problems
+        return verification
     results = testrun.run_commands(session.changes, session.test_commands, seconds, python_env)
     session.test_results = results
     problems = testrun.problems_from(results, session.changes, seconds)
     failed = sum(r.failed for r in results)
     skipped = sum(bool(r.skipped) for r in results)
+    if results and skipped == len(results):
+        session.note_test("test run: every planned command was refused ("
+                          + "; ".join(dict.fromkeys(r.skipped for r in results))[:200] + ")")
     verification.checks.append(f"test run: {len(results)} command(s), {failed} failed, {skipped} skipped")
     session.emit({"event": "test_run", "results": [r.to_dict() for r in results]})
     verification.problems += problems
     verification.passed = not verification.problems
     return verification
+
+
+def _import_check(session: Session, python_env: testrun.PythonEnv, verification: VerificationResult,
+                  seconds: float) -> None:
+    """Import every project module in the sandbox (Django: after setup, then its system checks).
+
+    Failures involving files this run changed go to repair; failures in untouched code are warnings.
+    """
+    result = testrun.import_check(session.changes, python_env, max(60.0, seconds * 3))
+    if not result.ran:
+        if result.note:
+            verification.checks.append(f"import check not run: {result.note}")
+        return
+    mine = [f for f in result.failures if f["changed"]]
+    older = [f for f in result.failures if not f["changed"]]
+    verification.checks.append(f"import check: {len(result.modules)} module(s), {len(result.failures)} failed"
+                               + (f" ({result.note})" if result.note else ""))
+    session.emit({"event": "import_check", "modules": len(result.modules), "note": result.note,
+                  "failures": [{"module": f["module"], "path": f["path"], "changed": bool(f["changed"]),
+                                "error": f["detail"].splitlines()[0]} for f in result.failures]})
+    verification.problems += [{"path": f["path"], "check": "import-run", "detail": f["detail"]} for f in mine]
+    for failure in older:
+        note = f"import check: {failure['detail'].splitlines()[0]} (in {failure['path']}, which this run did not change)"
+        if note not in session.import_notes:
+            session.import_notes.append(note)
+
+
+def _generate_migrations(session: Session, python_env: testrun.PythonEnv, verification: VerificationResult) -> None:
+    """Django migrations for the proposed models, made by Django itself (makemigrations), not by a model."""
+    previous = set(session.migrations)
+    for path in previous:  # regenerate from scratch: the models may have changed since
+        change = next((c for c in session.changes.changes() if c.path == path), None)
+        if change is not None and change.author_role == autofix.TOOL_ROLE:
+            session.changes.discard(path)
+    created, error = testrun.generate_migrations(session.changes, python_env)
+    if error:
+        verification.checks.append("makemigrations failed: " + error.splitlines()[-1][:160])
+        return
+    if not created:
+        return
+    session.migrations = set(created)
+    if set(created) == previous:
+        for path, content in created.items():  # same files again: put them back quietly
+            session.changes.add(FileChange(path, "create", content, author_role=autofix.TOOL_ROLE,
+                                           work_item_id=autofix.TOOL_ITEM))
+        return
+    session.add_tool_changes([(path, content, "generated by Django's makemigrations")
+                              for path, content in sorted(created.items())], phase="migrations")
+    verification.checks.append(f"migrations generated: {', '.join(sorted(created))}")
 
 
 def verify_and_repair(session: Session, max_repairs: int) -> None:
@@ -554,13 +731,15 @@ def verify_and_repair(session: Session, max_repairs: int) -> None:
         verification.checks.append(f"after repair attempt {attempt}")
     # Soft problems left after repairs are reported, not blocking: removing code may be what the task wants,
     # and a planned test command can be wrong too (unless CODING_AGENT_TEST_RUN=block).
-    soft = set(SOFT_CHECKS) | ({"test-run"} if test_mode != "block" else set())
+    # The import check runs the code like the test run does, so it follows the same mode.
+    soft = set(SOFT_CHECKS) | ({"test-run", "import-run"} if test_mode != "block" else set())
     leftover = [p for p in verification.problems if p["check"] in soft]
     if leftover:
         verification.problems = [p for p in verification.problems if p["check"] not in soft]
         verification.passed = not verification.problems
+        labels = {"test-run": "test run", "import-run": "import check"}
         session.test_warnings = [
-            (f"test run: {p['detail'].splitlines()[0]} (in {p['path']})" if p["check"] == "test-run"
+            (f"{labels[p['check']]}: {p['detail'].splitlines()[0]} (in {p['path']})" if p["check"] in labels
              else f"{p['path']}: {p['detail'].split('. Keep')[0]}")
             for p in leftover]
     session.verification = verification
@@ -578,16 +757,22 @@ def finish(session: Session, report: RunReport, *, remember: bool) -> RunReport:
     failed = [o for o in session.outputs if o.error]
     report.warnings = [f"{o.role} ({o.phase}) failed: {o.error[:200]}" for o in failed]
     report.warnings += [f"{o.role} ({o.phase}): {c}" for o in session.outputs for c in o.concerns
-                        if c.startswith("rejected file")]
+                        if c.startswith(("rejected file", "rejected ", "failed: "))]
     report.warnings += session.test_warnings
+    report.warnings += session.test_notes
+    report.warnings += session.import_notes
     if session.test_env_shown[1]:
         report.warnings.append(f"test run: dependencies not installed: {session.test_env_shown[1]}")
     report.test_run = [r.to_dict() for r in session.test_results]
+    report.notes = [f"fixed by tools: {note}" for note in session.tool_notes]
     # A specialist whose model failed may still deliver (e.g. a reviewer's deterministic tools).
     empty = [o for o in failed if not (o.changes or o.findings or o.work_items or o.decisions)]
     everyone_failed = bool(session.outputs) and len(empty) == len(session.outputs)
 
-    if everyone_failed and not report.changes:
+    if session.plan_failures:
+        report.error = ("No usable plan from " + "; ".join(session.plan_failures)
+                        + ". Nothing was written: without a plan, specialists end up writing files outside their part.")
+    elif everyone_failed and not report.changes:
         report.error = f"Every specialist failed ({len(failed)}): " + "; ".join(
             f"{o.role}: {o.error[:120]}" for o in failed)
     elif session.builders_ran and not report.changes:
@@ -598,6 +783,7 @@ def finish(session: Session, report: RunReport, *, remember: bool) -> RunReport:
     elif report.changes and session.request.mode == "apply":
         session.workspace.apply(report.changes, session.run_dir)
         report.status = "completed"
+        report.notes += projectdocs.record_run(session.workspace, report, session.run_dir)
     elif report.changes:
         report.status = "proposed"
     else:

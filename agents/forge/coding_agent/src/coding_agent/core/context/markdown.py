@@ -15,6 +15,7 @@ Context comes from four places, cheapest first:
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -36,7 +37,8 @@ SPECIAL_NAMES = frozenset({"dockerfile", "makefile", "requirements.txt", "packag
 MEMORY_FILE = "PROJECT_MEMORY.md"
 CONVENTIONS_FILE = "CONVENTIONS.md"
 MEMORY_KEEP_ENTRIES = 15
-_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+LOGGER = logging.getLogger(__name__)
+_TOKEN =re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 _STOP = frozenset({
     "the", "and", "for", "with", "that", "this", "from", "into", "should", "would", "could", "make",
     "add", "use", "using", "new", "create", "build", "write", "implement", "file", "files", "code",
@@ -75,6 +77,19 @@ class MarkdownContextProvider:
         self.focus_file_chars = focus_file_chars
         self.doc_chars = doc_chars
         self._files: list[str] | None = None
+        self._brief = None
+
+    def project_brief(self):
+        """Facts, open issues and what earlier runs left open (core/projectdocs.py), built once per run."""
+        if self._brief is None:
+            from ..projectdocs import Brief, brief
+
+            try:
+                self._brief = brief(self.workspace)
+            except Exception:  # a parsing surprise must never stop a run
+                LOGGER.warning("could not build the project brief", exc_info=True)
+                self._brief = Brief()
+        return self._brief
 
     # ----------------------------------------------------------------- helpers
     @property
@@ -159,6 +174,8 @@ class MarkdownContextProvider:
         conventions = self._read_memory(CONVENTIONS_FILE)
         bundle.add("Project conventions", conventions, f".coding-agent/memory/{CONVENTIONS_FILE}", 5)
         if role.kind in ("analyst", "planner", "designer", "coordinator"):
+            bundle.add("Project brief (read from the code; issues and history from earlier runs)",
+                       self.project_brief().text, ".coding-agent/PROJECT.md", 12)
             memory = self._read_memory(MEMORY_FILE)
             bundle.add("Decisions from earlier runs", memory, f".coding-agent/memory/{MEMORY_FILE}", 15)
             for rel, text in self._docs():

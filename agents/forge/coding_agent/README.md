@@ -178,9 +178,14 @@ GEMINI_QUOTA_GEMINI_3_5_FLASH_LITE=15,250000,500
 - **Overload (HTTP 5xx) or a timeout:** the call is retried `GEMINI_RETRIES`
   times (default 2), with short pauses.
 
-When a call is not sent or still fails, that one call goes to the unit's
-role-type default on Ollama. Fallback happens once, from Gemini to local,
-so it can't loop. The output's model source then says why, e.g.
+When a call is not sent or still fails, that one call goes to a fallback:
+
+1. `FORGE_GEMINI_FALLBACK_MODEL`, when it's set to a different hosted model
+   (for example `@general`, so `gemini-2.5-flash` out of quota tries
+   `gemini-3.5-flash-lite` next).
+2. Otherwise, or if that fails too, the unit's role-type default on Ollama.
+
+Each step is tried once, so it can't loop. The output's model source then says why, e.g.
 `gemini:gemini-4-hydrogen unavailable, fell back to the planning default (...)`.
 
 Per-day counts and benches are saved in `~/.alisa/forge/gemini_usage.json`
@@ -372,8 +377,31 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
 - **Leads plan only their division's part.** Each division lead is told which builders from other
   divisions are on the run, and leaves their work to them. For example, the Tech Lead leaves
   Dockerfiles to DevOps.
+  - An **empty plan** while other divisions are building means "this is their part": the division
+    builds nothing. (Treating it as a failure once put the Database Developer on a Dockerfile.)
+  - A lead whose model **fails to plan** gets one retry. If it fails again, the run stops and writes
+    nothing, instead of letting every specialist guess at its part.
+- **Builders check their own files.** Right after a builder writes its files, the tools add imports
+  that have one right answer, then check the files for syntax errors, undefined names and imports of
+  names that don't exist. The builder gets one round to fix what's left (`CODING_AGENT_SELF_CHECK`,
+  default 1, `0` turns it off) before the next work item starts.
+- **Builders get facts, not guesses.** Each builder and repair gets a "Project facts" section read
+  from the code for the files it works on: backend routes with their methods (for frontend and
+  Docker files), the frontend's API calls (for backend files), the dependencies already listed, the
+  project layout, and known problems in those files.
+- **The tools fix what has one right answer** before the gate runs, and again before every repair
+  round. See [The team's tools](#the-teams-tools).
 - **Existing code is kept.** Builders that modify a file must keep the functions, classes, exports and
   URL routes already in it.
+- **Big work items are written file by file.** Leads give each work item at most 3 files.
+  - A work item with 3 or more files is written one model call per file.
+  - So is any work item whose single answer ran out of output tokens.
+  - Repairs touching 3 or more files, or cut off the same way, go one file at a time too.
+- **Specialists with nothing to do may say so.** A specialist without a lead-assigned work item is
+  told which files other work items already own, and that an empty answer is fine. If it still
+  tries to change owned files, the rejections show up as one warning, not one per file.
+- **Backup folders are ignored.** Folders named `*.bak`, `*.old`, `*.orig`, `*.backup`, `backup`,
+  `backups` or `old` are not read as project files, nor copied into the test run.
 - **The files gate** is the only blocking check. It requires that:
   - every assigned file is produced
   - Python compiles
@@ -388,10 +416,37 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
     - `ROOT_URLCONF`, `WSGI_APPLICATION` and `ASGI_APPLICATION`
     - `INSTALLED_APPS` and `MIDDLEWARE`
     - middleware classes listed in `INSTALLED_APPS` are reported
+    - folders of modules without `__init__.py` count as project packages
+    - a Django settings module with no `manage.py` in the project is reported
   - **JavaScript/TypeScript relative imports work:**
     - the imported file exists
     - default, named and `ns.member` imports match what that file exports
-    - package imports such as `react` are not checked
+  - **Names are defined** (changed Python files):
+    - every name used is defined or imported, following Python's scoping rules; the problem says
+      which import fits when exactly one does
+    - nothing is used at import time before its definition, such as a class body naming a class
+      defined further down
+    - imports don't go through the folder the code runs from (`from backend.menu.models` in a
+      project whose `manage.py` is in `backend/`)
+  - **Dependencies are listed:**
+    - packages the Python code imports, the Django settings load (`INSTALLED_APPS`, `MIDDLEWARE`,
+      backends, the database driver), or a Dockerfile or script starts (`gunicorn`) are in the
+      nearest `requirements.txt` or `pyproject.toml`
+    - packages the frontend imports are in its `package.json`, and a frontend without one is reported
+    - a Vite app's `package.json` has a `build` script
+  - **`index.html` loads files that exist.**
+  - **Dockerfiles fit the project** (soft: warns after repairs):
+    - `COPY` sources exist; a missing file is reported under its own path, so it gets created
+    - a stage copies the build from where the build tool writes it (Vite: `dist/`)
+    - `npm ci` has a lock file; `npm run <script>` scripts exist
+    - `python manage.py ...` and `gunicorn module:app` in the CMD, entrypoint scripts and supervisord
+      programs find their files in the image, given `WORKDIR`, `cd` and `--chdir`
+  - **The frontend calls routes the backend has** (soft): every API call found in the frontend
+    (axios, instances with a `baseURL`, `fetch`) is matched against the Django routes, including DRF
+    routers, `@action` routes and the methods each view allows. An SPA catch-all route doesn't count.
+
+  Problems in files the run didn't touch are not this run's job: they are listed as open issues in
+  the project brief instead.
 
   If the gate fails, the Debugging Specialist gets up to 2 repair rounds. If it still fails, nothing is
   written, and proposals are kept under `.coding-agent/runs/<run_id>/proposed/`.
@@ -412,13 +467,42 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
     - URLs, local paths, `-e`, `-r` and pip options are refused.
     - Set `CODING_AGENT_TEST_DEPS=off` to skip installing.
   - **Subfolders:** `python manage.py check` finds `backend/manage.py` and runs it from `backend/`.
+  - **Settings:** values from the project's `.env.example` (root, or one folder down) are set in the
+    sandbox, so code that requires them can start. Only placeholders: real `.env` files are never read.
+  - **Migrations:** before the commands run, Django's own `makemigrations` generates the migrations
+    for the project's apps in the sandbox. New migration files join the proposal, marked as made by
+    the tools.
+  - **Import check:** the harness, not a model, then imports every project module in the sandbox.
+    For Django that's every module under the folder `manage.py` runs from, after `django.setup()`,
+    followed by the system checks with every module loaded. For other projects, only modules inside
+    packages are imported: a top-level script would start its program. It catches code that fails
+    as soon as it is loaded, such as `from django.setup import setup`, a name a package doesn't
+    have, or a test module that defines a clashing model. A failure involving a file the run changed
+    goes to repair, and follows the test run's mode. A failure in code the run left alone is a
+    warning.
+  - **Modules are not run as scripts:** a planned `python backend/orders/serializers.py` is refused.
+    A Django module run directly fails before its own code runs ("settings are not configured"),
+    and so does a module with relative imports. In a real run, seven such commands sent the Debugging
+    Specialist to rewrite six files that had no bug.
+  - **Not run at all** is a warning, never silent: the test run turned off, no commands planned, or
+    every planned command refused.
+  - **Servers:** commands that serve until stopped (`manage.py runserver`, `shell` and similar) are
+    skipped. A command that times out after printing that it started serving ("Starting development
+    server", "Listening on" and similar) counts as "needs a server", not a hang. On a timeout, the
+    command and every process it started are stopped, including Django's autoreload child.
   - **Failures:** these go back for repair, like a gate failure:
     - a command that hangs (`CODING_AGENT_TEST_TIMEOUT`, default 20 s)
     - a command that ends in a Python traceback
     - a non-zero exit with an import error, even when printed without a traceback
     - Django system-check errors (pointed at the file Django names)
     - `makemigrations --check` finding missing migrations
-    - a package the code imports that is missing from `requirements.txt`
+    - a package the code imports that is missing from `requirements.txt`, also when the program
+      prints its own "could not find X ... pip install x" message instead of a traceback
+    - a pinned version pip can't find while other versions exist, such as `psycopg[binary]==3.1.10`
+      on Python 3.12. The pin goes to repair before any command runs. A package with no prebuilt
+      build at all, or a network error, is only a warning.
+    - `manage.py <subcommand>` printing Django's command list instead of running the subcommand
+      (a `manage.py` that passes `sys.argv[1:]`), or Django reporting an unknown command
 
     A program that exits with its own error message is not a failure. A command that fails only
     because a database or other service isn't running is shown as `n/a`.
@@ -440,15 +524,57 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
   - When some specialists fail, the run continues, and each failure is listed as a warning.
 - **The CLI** proposes first and writes only after you type `yes`.
 
+## The team's tools
+
+Small models write plausible files but lose track of how files fit together. The tools take the
+parts with one right answer off the model, and give it facts instead of making it guess. None of
+them calls a model, and every fix is part of the proposal you approve, marked `(tools)`.
+
+| Tool | What it does |
+|---|---|
+| Facts (`core/projectfacts.py`) | reads layout, dependencies, Django routes and allowed methods, frontend API calls and environment variables from the code |
+| Checks (`core/checks.py`) | the gate checks above, for one run or the whole project |
+| Fixes (`core/autofix.py`) | adds missing packages to `requirements.txt` (known PyPI names only); creates or completes `package.json` with versions known to work together and the Vite scripts; creates a missing `manage.py`, `wsgi.py` or `asgi.py` from the settings; fixes a `manage.py` that passes `sys.argv[1:]`; adds imports that have one right answer and strips the run folder from imports (`backend.menu.models` -> `menu.models`); in Dockerfiles, `npm ci` without a lock file becomes `npm install` and a Vite build is copied from `dist/` |
+| Migrations (`testrun.generate_migrations`) | Django's `makemigrations` for the project's apps, in the sandbox |
+| Brief and changelog (`core/projectdocs.py`) | what one run leaves for the next |
+
+Everything else (route design, which side of an API mismatch is wrong, where a command should run)
+stays a problem for the model, stated exactly.
+
+**What one run leaves for the next.** After a run writes changes:
+
+- `CHANGELOG.md` in the project gets an entry, newest first: the task, files created, changed and
+  deleted, what the gate and the test run found, and what was left open. It comes from the run
+  report, not from a model.
+- `.coding-agent/PROJECT.md` is rewritten: requirements from earlier runs, layout, dependencies,
+  backend routes, frontend API calls, environment variables, open issues found in the code, and
+  what the run left open.
+- **Requirements carry over.** Every run's `--constraint` and `--acceptance-criteria` values are
+  added to the brief's "Requirements from earlier runs" (up to 40; one given again moves up with the
+  newer run id). The changelog entry lists them too. A later "fix whatever is wrong" run then still
+  knows that, say, the API must stay under `/api/`.
+
+At the start of the next run, the brief is rebuilt from the code as it is then (so your own edits
+count), plus the requirements, what the last run left open and the recent changelog entries.
+Analysts, planners, designers and leads get the whole brief; leads are told to plan fixes for open
+issues that block the request or sit in files they plan to change. Builders and the Debugging
+Specialist get the requirements and the facts about their own files, and are told to fix the side of
+a frontend/backend mismatch that breaks a requirement.
+
+Requirements are recorded from the first run with this version on. For rules that should hold from
+the start, or that earlier runs were given, write them in `.coding-agent/memory/CONVENTIONS.md`:
+every specialist reads it.
+
 ## Context
 
 - **API, UI and CLI** use Markdown context, in priority order:
   1. `.coding-agent/memory/CONVENTIONS.md`
-  2. `PROJECT_MEMORY.md`, holding the last 15 run summaries
-  3. project docs
-  4. a file map of the workspace
-  5. the assigned files
-  6. ranked source excerpts
+  2. the project brief (analysts, planners, designers and leads; see above)
+  3. `PROJECT_MEMORY.md`, holding the last 15 run summaries
+  4. project docs
+  5. a file map of the workspace
+  6. the assigned files
+  7. ranked source excerpts
 - **The Forge** (`CodingAgent.forge_invocation(retriever)`) adds retrieved Forge knowledge, which
   every in-process unit under the one called inherits.
 
@@ -462,6 +588,8 @@ coding-agent units --unit development --json
 coding-agent run D:\work\app "<task>"                  # whole agent
 coding-agent run D:\work\app "<task>" --unit security  # any unit by path or id
 coding-agent team D:\work\app "<task>"                 # preview the agent's team (no model)
+coding-agent check D:\work\app [--facts]               # open issues read from the code (no model, writes nothing)
+coding-agent fix D:\work\app [--yes]                   # apply the tools' fixes to the whole project, after approval
 coding-agent serve --allow-root D:\work --unit postgres_developer --port 8801
 ```
 
@@ -484,6 +612,7 @@ coding-agent serve --allow-root D:\work --unit postgres_developer --port 8801
 | `CODING_AGENT_LLM_TIMEOUT`, `CODING_AGENT_OLLAMA_NUM_PREDICT`, `CODING_AGENT_OLLAMA_NUM_CTX` | Ollama request limits |
 | `CODING_AGENT_TARGET_ENVIRONMENT` | OS and Python the generated code must run on (default: this machine) |
 | `CODING_AGENT_TEST_RUN`, `CODING_AGENT_TEST_TIMEOUT` | Debugging Specialist test run: `repair` (default), `block` or `off`; seconds per command (default 20) |
+| `CODING_AGENT_SELF_CHECK` | rounds a builder gets to fix problems in its own files right after writing them (default 1, `0` = off) |
 | `CODING_AGENT_TEST_DEPS`, `CODING_AGENT_TEST_ENV_DIR`, `CODING_AGENT_TEST_INSTALL_TIMEOUT` | Install `requirements.txt` for the test run: `install` (default) or `off`; cache folder (default `~/.alisa/forge/testrun-envs`); seconds per install (default 600) |
 | `GEMINI_API_KEY`, `GEMINI_API_BASE` | Gemini access (only needed when a unit uses `gemini:`) |
 | `FORGE_GEMINI_<NAME>_MODEL` | named Gemini models, used as `gemini:@<name>` |
@@ -502,6 +631,9 @@ Each run writes to `<workspace>/.coding-agent/runs/<run_id>/`:
 - `changes.jsonl` (when changes are written)
 - `backup/` (copies of overwritten files)
 - `proposed/` (when nothing was written)
+
+Runs that write changes also update `<workspace>/CHANGELOG.md` and `<workspace>/.coding-agent/PROJECT.md`
+(see [The team's tools](#the-teams-tools)). `coding-agent fix` writes to `runs/<time>-tools/`.
 
 ## Tests
 

@@ -31,7 +31,8 @@ def is_js(path: str) -> bool:
 
 
 def _strip_comments(source: str) -> str:
-    return _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", source))
+    # Block comments keep their line breaks so reported line numbers stay right.
+    return _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), source))
 
 
 def exports(source: str) -> tuple[set[str], bool]:

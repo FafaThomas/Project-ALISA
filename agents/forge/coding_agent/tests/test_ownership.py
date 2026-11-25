@@ -64,6 +64,6 @@ def test_the_expense_tracker_overwrite_cannot_happen_again(tmp_path):
     authors = {c.path: c.author_role for c in report.changes}
     assert authors == {"storage.py": "debugging_specialist", "models.py": "python_developer",
                        "main.py": "python_developer"}
-    rejected = [w for w in report.warnings if "rejected file" in w]
-    assert len(rejected) == 2 and all("debugging_specialist" in w for w in rejected)
+    rejected = [w for w in report.warnings if "owned by other work items" in w]
+    assert len(rejected) == 1 and "debugging_specialist" in rejected[0] and "rejected 2 file(s)" in rejected[0]
     assert "Write only these" in next(c["prompt"] for c in llm.calls if c["role"] == "debugging_specialist")

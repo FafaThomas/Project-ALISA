@@ -200,6 +200,11 @@ class RunReport:
     # The Debugging Specialist's test run (last round): command, exit code, hang, output tails.
     test_run: list[dict[str, Any]] = field(default_factory=list)
     artifacts_dir: str = ""
+    # What the run did besides the changes: fixes made by tools, the changelog and project brief it updated.
+    notes: list[str] = field(default_factory=list)
+    # The request's requirements, kept in the project brief so later runs keep meeting them.
+    constraints: list[str] = field(default_factory=list)
+    acceptance_criteria: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

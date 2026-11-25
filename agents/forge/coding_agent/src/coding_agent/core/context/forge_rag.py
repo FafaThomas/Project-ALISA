@@ -85,6 +85,9 @@ class ForgeRAGContextProvider:
                 paths.append(rel)
         return paths[:limit]
 
+    def project_brief(self):
+        return self.markdown.project_brief()
+
     def remember(self, entry_markdown: str) -> None:
         # Durable notes still go to Markdown memory; the Forge owns its own
         # ingestion schedule and can index .coding-agent/memory if it wants.

@@ -96,7 +96,11 @@ TEST_PLAN_INSTRUCTIONS = (
     "(python backend/manage.py check); a script in a subfolder runs from its own folder. The packages in the "
     "project's requirements.txt are installed, but no database server, network or other service is running: "
     "leave out commands that need one (for Django, use 'manage.py check' and commands that do not touch the "
-    "database, not migrate, runserver or test against PostgreSQL). Exercise every feature the task asked "
+    "database, not migrate, runserver or test against PostgreSQL). Every command must exit on its own: never "
+    "start a server or anything that runs until stopped (runserver, gunicorn, a web app's main script, a "
+    "watcher, a worker). Run only entry points: manage.py subcommands for Django, or files that have "
+    "if __name__ == '__main__':. Never run a module such as models.py, views.py, serializers.py or urls.py "
+    "directly: it fails before its own code runs. Exercise every feature the task asked "
     "for, the way a user would, including one realistic error case. Commands must finish in a few seconds without "
     "keyboard input or network access. Use only arguments the code actually accepts; read the entry point's "
     "argument parsing first. Use concrete values only, never placeholders such as <id>: if a command needs a "
@@ -123,7 +127,9 @@ SCHEMA_BY_KIND: dict[str, dict[str, Any]] = {
 _KIND_INSTRUCTIONS: dict[str, str] = {
     "analyst": (
         "Study the existing workspace. Report what already exists that matters for this task: entry points, "
-        "modules, conventions, and which files will likely change. Do not propose code."
+        "modules, conventions, and which files will likely change. The project brief is read from the code: "
+        "trust it over guesses, and report its open issues that matter for this task as concerns. Do not "
+        "propose code."
     ),
     "planner": (
         "Contribute your perspective to the plan. Record concrete decisions the team should follow and any "
@@ -138,21 +144,31 @@ _KIND_INSTRUCTIONS: dict[str, str] = {
         "Turn the team's plan and design into work items. Each work item has one owner from the developers "
         "listed below and an explicit list of workspace-relative file paths it creates or modifies. Each file "
         "belongs to exactly one work item. Order items so that files others depend on come first. Keep the "
-        "number of work items small; group closely related files with the same owner. In each description, "
+        "number of work items small; group closely related files with the same owner, but give each work item "
+        "at most 3 files, and put large files such as UI pages in items of their own. In each description, "
         "name the functions and classes the file must provide (with parameters) and which other files import "
-        "them, so separately written files fit together."
+        "them, so separately written files fit together. Plan every file the project needs to run, including "
+        "framework boilerplate a new project needs (for Django: manage.py, the project package's __init__.py, "
+        "wsgi.py and asgi.py, and each app's __init__.py and apps.py). The project brief lists open issues "
+        "found in the code and what the last run left open: plan fixes for the ones that block the request or "
+        "sit in files you plan to change."
     ),
     "builder": (
         "Implement your assigned work item. Return the COMPLETE content of every file you create or modify "
         "(never a diff or a placeholder such as '...rest unchanged'). Use workspace-relative paths with forward "
         "slashes. Stay consistent with the team's decisions and with files other developers own. When you "
         "modify an existing file, start from its current content and keep every function, class, export and "
-        "URL route already there unless the task asks to remove it; add your code alongside. Write "
+        "URL route already there unless the task asks to remove it; add your code alongside. The 'Project "
+        "facts' section is read from the code: keep meeting the requirements from earlier runs it lists, call "
+        "the backend routes it lists with the methods it lists, import every name you use, and fix the known "
+        "problems it lists in your files. When a frontend call and a backend route disagree, fix the side that "
+        "breaks those requirements. Write "
         "production-quality code with no TODO stubs."
     ),
     "repairer": (
         "Fix the reported problems. Find the root cause, then return the COMPLETE corrected content of each "
-        "file you change. Change only what is needed to fix the problems."
+        "file you change. Change only what is needed to fix the problems, and keep meeting the requirements "
+        "from earlier runs listed under 'Project facts'."
     ),
     "reviewer": (
         "Review the proposed changes from your specialty only. Report concrete findings with the file, the "
@@ -166,9 +182,15 @@ _LEAD_INSTRUCTIONS = (
     "Each work item has one owner from the specialists listed below and an explicit list of workspace-relative "
     "file paths it creates or modifies. Each file belongs to exactly one work item. Order items so that files "
     "others depend on come first. Keep the number of work items small; group closely related files with the "
-    "same owner. In each description, name the functions and classes the file must provide (with "
-    "parameters) and which other files import them, so separately written files fit together. Do not "
-    "assign files another division already produced unless they must change."
+    "same owner, but give each work item at most 3 files: every file is written in full and an answer has a "
+    "length limit, so put large files such as UI pages in items of their own. In each description, name the "
+    "functions and classes the file must provide (with parameters) and which other files import them, so "
+    "separately written files fit together. Do not assign files another division already produced unless "
+    "they must change. Plan every file the project needs to run, including framework boilerplate a new "
+    "project needs (for Django: manage.py, the project package's __init__.py, wsgi.py and asgi.py, and each "
+    "app's __init__.py and apps.py). The project brief lists open issues found in the code and what the last "
+    "run left open: plan fixes for the ones in your division's area that block the request or sit in files "
+    "you plan to change. If the request has no part for your division, return an empty work_items list."
 )
 
 

@@ -115,7 +115,9 @@ def _project_root_of(module: str, importer: str, exists: Callable[[str], bool]) 
     """The folder from which ``module``'s first segment is a project package or module, if any."""
     first = module.split(".")[0]
     for base in _bases(importer, 0):
-        if exists(_clean(base / f"{first}.py")) or exists(_clean(base / first / "__init__.py")):
+        # a module, a package, or a folder of modules without __init__.py
+        if exists(_clean(base / f"{first}.py")) or exists(_clean(base / first / "__init__.py")) \
+                or exists(_clean(base / first) + "/"):
             return base
     return None
 
@@ -123,6 +125,9 @@ def _project_root_of(module: str, importer: str, exists: Callable[[str], bool]) 
 def missing_module(module: str, importer: str, level: int, exists: Callable[[str], bool]) -> str | None:
     """A description of the missing file when ``module`` is clearly meant to be a project module."""
     if any(exists(c) for c in _candidates(module, importer, level)):
+        return None
+    # A folder of Python files without __init__.py is still importable (a namespace package).
+    if module and any(exists(_clean(base.joinpath(*module.split("."))) + "/") for base in _bases(importer, level)):
         return None
     if level:
         base = _bases(importer, level)[0]
@@ -231,8 +236,11 @@ def dotted_reference_problems(paths: list[str], read: Reader, exists: Callable[[
             if missing_module(parent, path, 0, exists) is None and _project_root_of(parent, path, exists):
                 gone = None
         if gone:
-            problems.append({"path": path, "check": "references",
-                             "detail": f"line {line}: {what} '{dotted}', but {gone} does not exist"})
+            # Filed under the missing file, so the repair creates it instead of editing the reference
+            # (in a real run the Debugging Specialist "fixed" settings.py twice and never wrote wsgi.py).
+            problems.append({"path": gone, "check": "references", "related": path,
+                             "detail": f"{path} line {line}: {what} '{dotted}', but {gone} does not exist. "
+                                       f"Create {gone}, unless the reference itself is wrong."})
 
     for path in paths:
         if not path.endswith(".py"):

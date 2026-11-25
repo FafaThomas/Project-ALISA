@@ -60,6 +60,10 @@ class LLMError(RuntimeError):
     """An LLM request failed or returned something unusable."""
 
 
+class OutputLimitError(LLMError):
+    """The model ran out of output tokens before finishing its answer."""
+
+
 class ProviderUnavailableError(LLMError):
     """A hosted provider could not be reached or is temporarily failing."""
 
@@ -92,6 +96,22 @@ def resolve_alias(model: str) -> tuple[str, str]:
     return f"{provider}:{value}", f".env {var}"
 
 
+def hosted_fallback_model(provider: str) -> str | None:
+    """``FORGE_GEMINI_FALLBACK_MODEL``: another hosted model to try before the local one, or None."""
+    load_local_env()
+    value = env_value(f"FORGE_{provider.upper()}_FALLBACK_MODEL")
+    if not value:
+        return None
+    if ":" not in value:
+        value = f"{provider}:{value}"
+    try:
+        resolved, _ = resolve_alias(value)
+    except LLMError as exc:
+        LOGGER.warning("ignoring FORGE_%s_FALLBACK_MODEL: %s", provider.upper(), exc)
+        return None
+    return resolved if split_provider(resolved)[0] == provider else None
+
+
 def default_client_factory(model: str) -> "LLMClient":
     provider, name = split_provider(model)
     if provider == "gemini":
@@ -107,27 +127,34 @@ class FallbackClient:
     After each call, ``used_model`` and ``fallback_reason`` say what actually answered.
     """
 
-    def __init__(self, primary: "LLMClient", fallback: Callable[[], "LLMClient"], label: str) -> None:
+    def __init__(self, primary: "LLMClient", fallback: Callable[[], "LLMClient"], label: str,
+                 kind: str = "local") -> None:
         self.primary = primary
         self._fallback = fallback
         self.model = label
+        self.kind = kind                 # what the fallback is: "local" or "hosted"
         self.used_model = label
         self.fallback_reason = ""
+        self.fallback_kind = ""          # set when a fallback answered
         self.last_usage: dict[str, int] = {}
 
     def unload(self) -> bool:
         return self.primary.unload()
 
     def generate_json(self, system: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
-        self.used_model, self.fallback_reason = self.model, ""
+        self.used_model, self.fallback_reason, self.fallback_kind = self.model, "", ""
         try:
             reply = self.primary.generate_json(system, prompt, **kwargs)
             self.last_usage = dict(getattr(self.primary, "last_usage", {}) or {})
+            # The primary may itself be a fallback chain (hosted -> second hosted model).
+            self.used_model = getattr(self.primary, "used_model", None) or self.model
+            self.fallback_reason = getattr(self.primary, "fallback_reason", "") or ""
+            self.fallback_kind = getattr(self.primary, "fallback_kind", "") or ""
             return reply
         except ProviderUnavailableError as exc:
             local = self._fallback()
             LOGGER.warning("%s unavailable (%s); falling back to %s", self.model, exc, local.model)
-            self.used_model, self.fallback_reason = local.model, str(exc)[:200]
+            self.used_model, self.fallback_reason, self.fallback_kind = local.model, str(exc)[:200], self.kind
             reply = local.generate_json(system, prompt, **kwargs)
             self.last_usage = dict(getattr(local, "last_usage", {}) or {})
             return reply
@@ -267,7 +294,7 @@ class OllamaClient:
         prompt_tokens, output_tokens = int(final.get("prompt_eval_count") or 0), int(final.get("eval_count") or 0)
         self.last_usage = {"prompt": prompt_tokens, "output": output_tokens, "total": prompt_tokens + output_tokens}
         if final.get("done_reason") == "length":
-            raise LLMError(
+            raise OutputLimitError(
                 f"Output hit CODING_AGENT_OLLAMA_NUM_PREDICT ({self.num_predict}) before the JSON finished"
             )
         return parse_json_object("".join(parts))
@@ -361,12 +388,20 @@ class ModelRouter:
             model, alias_source = resolve_alias(model)
             if alias_source:
                 source = f"{source} -> {alias_source}"
-            if split_provider(model)[0] != "ollama":
-                key = f"{model}|fallback:{tier}"
+            provider = split_provider(model)[0]
+            if provider != "ollama":
+                hosted_fallback = hosted_fallback_model(provider)
+                if hosted_fallback == model:
+                    hosted_fallback = None
+                key = f"{model}|fallback:{hosted_fallback or ''}|{tier}"
                 client = self._by_model.get(key)
                 if client is None:
-                    client = self._by_model[key] = FallbackClient(
-                        self._model_client(model), lambda: self._tier_client(tier), model)
+                    primary: LLMClient = self._model_client(model)
+                    if hosted_fallback:
+                        # e.g. gemini-2.5-flash out of quota -> gemini-3.5-flash-lite -> the local tier model
+                        primary = FallbackClient(primary, lambda fb=hosted_fallback: self._model_client(fb), model,
+                                                 kind="hosted")
+                    client = self._by_model[key] = FallbackClient(primary, lambda: self._tier_client(tier), model)
             else:
                 client = self._model_client(model)
         else:
