@@ -248,7 +248,12 @@
 
   function renderUser(item) {
     return h('div', { class: 'msg user', 'data-id': item.id },
-      h('div', { class: 'meta', text: `${item.mode === 'ask' ? 'Ask' : 'Code'} · ${item.unitLabel}` }),
+      h('div', { class: 'meta' },
+        h('span', { text: `${item.mode === 'ask' ? 'Ask' : 'Code'} · ${item.unitLabel}${item.retry ? ' · retry' : ''}` }),
+        h('button', {
+          type: 'button', class: 'link edit', text: 'Edit', title: 'Put this message back in the message box to change it and send it again',
+          onclick: () => send({ type: 'edit', itemId: item.id }),
+        })),
       h('div', { class: 'text', text: item.text }),
       item.files.length ? h('div', { class: 'files' }, item.files.map((file) => h('span', { class: 'chip', title: file, text: basename(file) }))) : null);
   }
@@ -284,7 +289,12 @@
       }))));
     }
     for (const note of item.notes) node.append(h('div', { class: 'note', text: note }));
+    if (item.retryable) node.append(h('div', { class: 'buttons' }, retryButton(item, 'Ask the same question again')));
     return node;
+  }
+
+  function retryButton(item, title) {
+    return h('button', { type: 'button', class: 'secondary', text: 'Retry', title, onclick: () => send({ type: 'retry', itemId: item.id }) });
   }
 
   /** `path/to/file.py` in an answer opens the file, when the answer listed it. */
@@ -331,8 +341,27 @@
           h('span', { text: entry.text }),
           entry.detail ? h('pre', { class: 'detail', text: entry.detail }) : null)))));
     }
-    if (!result) return node;
+    if (result) renderResult(node, item, result);
 
+    const buttons = [];
+    if (result?.changes.length && item.status !== 'discarded') {
+      buttons.push(h('button', { type: 'button', class: 'secondary', text: 'Review changes', onclick: () => send({ type: 'reviewAll', itemId: item.id }) }));
+    }
+    if (item.status === 'proposed') {
+      buttons.push(h('button', { type: 'button', class: 'primary', text: 'Apply', title: 'Write these changes to your files', onclick: () => send({ type: 'apply', itemId: item.id }) }));
+      buttons.push(h('button', { type: 'button', class: 'secondary', text: 'Discard', title: 'Leave your files as they are', onclick: () => send({ type: 'discard', itemId: item.id }) }));
+    }
+    if (item.retryable) {
+      buttons.push(retryButton(item, item.status === 'proposed' ? 'Discard this proposal and run the task again' : 'Run the same task again'));
+    }
+    if (result?.artifactsDir) {
+      buttons.push(h('button', { type: 'button', class: 'secondary', text: 'Report', title: 'Open the run report', onclick: () => send({ type: 'openReport', itemId: item.id }) }));
+    }
+    if (buttons.length) node.append(h('div', { class: 'buttons' }, buttons));
+    return node;
+  }
+
+  function renderResult(node, item, result) {
     if (result.changes.length) {
       const done = item.status === 'applied' || item.status === 'completed';
       node.append(h('div', { class: 'changes' },
@@ -371,20 +400,6 @@
     if (notes.length) {
       node.append(section(item, 'notes', `Notes (${notes.length})`, h('ul', { class: 'plain' }, notes.map((n) => h('li', { text: n })))));
     }
-
-    const buttons = [];
-    if (result.changes.length && item.status !== 'discarded') {
-      buttons.push(h('button', { type: 'button', class: 'secondary', text: 'Review changes', onclick: () => send({ type: 'reviewAll', itemId: item.id }) }));
-    }
-    if (item.status === 'proposed') {
-      buttons.push(h('button', { type: 'button', class: 'primary', text: 'Apply', title: 'Write these changes to your files', onclick: () => send({ type: 'apply', itemId: item.id }) }));
-      buttons.push(h('button', { type: 'button', class: 'secondary', text: 'Discard', title: 'Leave your files as they are', onclick: () => send({ type: 'discard', itemId: item.id }) }));
-    }
-    if (result.artifactsDir) {
-      buttons.push(h('button', { type: 'button', class: 'secondary', text: 'Report', title: 'Open the run report', onclick: () => send({ type: 'openReport', itemId: item.id }) }));
-    }
-    node.append(h('div', { class: 'buttons' }, buttons));
-    return node;
   }
 
   // ------------------------------------------------------------------ inbox
@@ -412,6 +427,27 @@
       case 'server': state.server = message.server; renderServer(); break;
       case 'activeFile': state.activeFile = message.path; renderAttachments(); break;
       case 'attachments': state.attachments = message.attachments; renderAttachments(); break;
+      case 'prefs': // changed in the chat's other view
+        state.mode = message.mode;
+        state.unitPath = message.unitPath;
+        renderUnits();
+        renderComposer();
+        break;
+      case 'compose': // Edit on a message
+        state.mode = message.mode;
+        state.unitPath = message.unitPath;
+        input.value = ui.draft = message.text;
+        if (message.mode === 'code') {
+          constraints.value = ui.constraints = message.constraints.join('\n');
+          acceptance.value = ui.acceptance = message.acceptance.join('\n');
+          if (constraints.value || acceptance.value) requirements.open = true;
+        }
+        saveUi();
+        renderUnits();
+        renderComposer();
+        autosize();
+        input.focus();
+        break;
       case 'prefill':
         if (message.text) {
           input.value = (input.value.trim() ? `${input.value.replace(/\s+$/, '')}\n\n` : '') + message.text;

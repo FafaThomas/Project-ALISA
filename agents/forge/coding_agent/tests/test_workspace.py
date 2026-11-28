@@ -51,3 +51,14 @@ def test_list_files_skips_ignored_and_secret_files(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("x", encoding="utf-8")
     assert Workspace(tmp_path).list_files() == ["a.py", "src/b.py"]
+
+
+def test_list_files_skips_environments_whatever_their_name(tmp_path):
+    for rel in ("snake-game/main.py", "snake-game-venv/pyvenv.cfg",
+                "snake-game-venv/Lib/site-packages/pip/_vendor/distlib/compat.py",
+                "tools/conda-env/conda-meta/history", "tools/conda-env/lib/x.py",
+                "vendor/Lib/site-packages/pygame/__init__.py", "vendor/helper.py"):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+    assert Workspace(tmp_path).list_files() == ["snake-game/main.py", "vendor/helper.py"]

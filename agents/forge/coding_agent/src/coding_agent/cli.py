@@ -44,6 +44,8 @@ def _print_event(event: dict) -> None:
         print(f"\n== {event['phase']} ({', '.join(event['divisions'])}) ==")
     elif kind == "role_started":
         extra = f" ({event['work_item']})" if event.get("work_item") else ""
+        if event.get("phase") == "repair" and event.get("attempt"):
+            extra += f" repairing, round {event['attempt']} of {event.get('max_attempts') or '?'}"
         extra += " as lead" if event.get("lead") else ""
         extra += " [remote]" if event.get("remote") else ""
         print(f"  -> [{event.get('division', '')}] {_name(event['role'])}{extra} ...", flush=True)

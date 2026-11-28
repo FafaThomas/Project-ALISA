@@ -128,7 +128,7 @@ class Unit:
             session.emit({"event": "team", "team": team.ids, "rationale": team.rationale,
                           "divisions": {d: [r.id for r in members] for d, members in groups.items()},
                           "standby": [r.id for r in team.standby]})
-            run_phases(session, groups, self.runtime.max_repairs)
+            run_phases(session, groups, self.runtime.max_repairs if request.max_repairs is None else request.max_repairs)
             finish(session, report, remember=self.runtime.remember_runs)
         except Exception as exc:  # report every failure instead of raising to callers
             LOGGER.exception("%s %s run %s failed", self.level, self.unit_id, session.run_id)

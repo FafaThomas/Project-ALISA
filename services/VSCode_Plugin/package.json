@@ -21,7 +21,10 @@
     "ollama"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished",
+    "onWebviewPanel:alisa.chatPanel"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -47,6 +50,42 @@
         "title": "New Chat",
         "category": "ALISA",
         "icon": "$(add)"
+      },
+      {
+        "command": "alisa.showChat",
+        "title": "Show Chat",
+        "category": "ALISA",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "alisa.showInSidebar",
+        "title": "Show Chat in Sidebar",
+        "category": "ALISA",
+        "icon": "$(layout-sidebar-left)"
+      },
+      {
+        "command": "alisa.openInEditor",
+        "title": "Open Chat in Editor",
+        "category": "ALISA",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "alisa.openInNewWindow",
+        "title": "Open Chat in New Window",
+        "category": "ALISA",
+        "icon": "$(empty-window)"
+      },
+      {
+        "command": "alisa.toggleFullScreen",
+        "title": "Toggle Chat Full Screen",
+        "category": "ALISA",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "alisa.toggleWindowFullScreen",
+        "title": "Toggle Chat Window Full Screen",
+        "category": "ALISA",
+        "icon": "$(screen-full)"
       },
       {
         "command": "alisa.sendSelection",
@@ -79,6 +118,21 @@
           "group": "navigation@1"
         },
         {
+          "command": "alisa.openInEditor",
+          "when": "view == alisa.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "alisa.openInNewWindow",
+          "when": "view == alisa.chat",
+          "group": "navigation@3"
+        },
+        {
+          "command": "alisa.toggleFullScreen",
+          "when": "view == alisa.chat",
+          "group": "navigation@4"
+        },
+        {
           "command": "alisa.restartServer",
           "when": "view == alisa.chat",
           "group": "overflow@1"
@@ -87,6 +141,44 @@
           "command": "alisa.showOutput",
           "when": "view == alisa.chat",
           "group": "overflow@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "alisa.newChat",
+          "when": "activeWebviewPanelId == alisa.chatPanel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "alisa.openInNewWindow",
+          "when": "activeWebviewPanelId == alisa.chatPanel && !isAuxiliaryWindow",
+          "group": "navigation@2"
+        },
+        {
+          "command": "alisa.toggleFullScreen",
+          "when": "activeWebviewPanelId == alisa.chatPanel && !isAuxiliaryWindow",
+          "group": "navigation@3"
+        },
+        {
+          "command": "alisa.toggleWindowFullScreen",
+          "when": "activeWebviewPanelId == alisa.chatPanel && isAuxiliaryWindow",
+          "group": "navigation@3"
+        },
+        {
+          "command": "alisa.restartServer",
+          "when": "activeWebviewPanelId == alisa.chatPanel",
+          "group": "1_alisa@1"
+        },
+        {
+          "command": "alisa.showOutput",
+          "when": "activeWebviewPanelId == alisa.chatPanel",
+          "group": "1_alisa@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "alisa.toggleWindowFullScreen",
+          "when": "isAuxiliaryWindow"
         }
       ],
       "editor/context": [
@@ -144,6 +236,16 @@
           "default": null,
           "minimum": 1,
           "description": "Most specialists on a run's team. Empty: the agent's default."
+        },
+        "alisa.run.maxRepairs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null,
+          "minimum": 0,
+          "maximum": 10,
+          "markdownDescription": "How many rounds the Debugging Specialist gets to fix what the files gate or the test run found, before the run fails (0 to 10). Each round is one more model call and another check. Empty: the agent's default, 2."
         },
         "alisa.run.targetEnvironment": {
           "type": "string",

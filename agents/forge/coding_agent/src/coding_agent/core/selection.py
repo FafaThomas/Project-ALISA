@@ -20,7 +20,7 @@ from pathlib import PurePosixPath
 
 from .llm import LLMError, ModelRouter
 from .models import CodingRequest
-from .prompts import DIRECTOR_SYSTEM, TEAM_SCHEMA
+from .prompts import DIRECTOR_SYSTEM, TEAM_SCHEMA, conversation_md
 from .registry import DivisionSpec, RoleSpec, Tree, default_tree
 
 LOGGER = logging.getLogger(__name__)
@@ -244,8 +244,10 @@ class TeamAssembler:
         for r in self.tree.roster:
             team = f" (team: {', '.join(r.members)})" if r.is_team else ""
             lines.append(f"- {r.id}: {r.name} [{r.kind}] {r.responsibility}{team}")
+        conversation = conversation_md(request.history)
         prompt = (
             f"# Request\n{request.task}\n\n"
+            + (f"{conversation}\n\n" if conversation else "")
             + (f"Constraints: {'; '.join(request.constraints)}\n" if request.constraints else "")
             + (f"Acceptance criteria: {'; '.join(request.acceptance_criteria)}\n" if request.acceptance_criteria else "")
             + f"\nWorkspace has {len(workspace_files)} files"

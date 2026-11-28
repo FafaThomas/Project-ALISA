@@ -198,6 +198,56 @@ test('the draft survives the view being hidden and shown again', () => {
   assert.equal(($('textarea.input') as HTMLTextAreaElement).value, 'half-written task');
 });
 
+test('Retry is offered where the extension allows it, and sends the reply back', () => {
+  init([
+    { ...run, id: 'failed', status: 'failed', error: 'Generated files did not pass the files gate', retryable: true },
+    { ...run, id: 'unstarted', status: 'failed', result: null, error: 'The service is not available', retryable: true },
+    { ...run, id: 'applied', status: 'applied', retryable: false },
+    { ...run, id: 'proposed', status: 'proposed', retryable: true },
+    {
+      type: 'answer', id: 'a1', jobId: 'j', workspace: 'D:/work/app', unitPath: '', status: 'failed', role: 'Codebase Analyst',
+      markdown: '', files: [], notes: [], model: '', tokens: 0, error: 'model timed out', retryable: true,
+    },
+  ]);
+  const retryOn = (id: string) => $(`[data-id="${id}"]`)?.querySelector('.buttons button[title*="again"]') as HTMLElement | null;
+  for (const id of ['failed', 'unstarted', 'proposed', 'a1']) {
+    assert.equal(retryOn(id)?.textContent, 'Retry', id);
+  }
+  assert.equal(retryOn('applied'), null);
+  assert.ok(retryOn('proposed')?.title.startsWith('Discard this proposal'));
+  retryOn('unstarted')?.click();
+  assert.deepEqual(last(), { type: 'retry', itemId: 'unstarted' });
+  retryOn('a1')?.click();
+  assert.deepEqual(last(), { type: 'retry', itemId: 'a1' });
+});
+
+test('Edit puts a message back in the composer, with its mode, unit and requirements', () => {
+  init([{ type: 'user', id: 'u1', mode: 'code', text: 'Add a delete command', unitLabel: 'Python Developer', files: [], retry: true }]);
+  assert.ok($('.msg.user .meta')?.textContent?.includes('· retry'));
+  byText('.msg.user button', 'Edit')?.click();
+  assert.deepEqual(last(), { type: 'edit', itemId: 'u1' });
+
+  byText('button.mode', 'Ask')?.click();
+  deliver({
+    type: 'compose', text: 'Add a delete command', mode: 'code', unitPath: 'development/python_developer',
+    constraints: ['Keep argparse'], acceptance: [],
+  });
+  assert.equal(($('textarea.input') as HTMLTextAreaElement).value, 'Add a delete command');
+  assert.equal(($('select.unit') as HTMLSelectElement).value, 'development/python_developer');
+  assert.ok($('button.mode.active')?.textContent === 'Code');
+  assert.equal(($('#constraints') as HTMLTextAreaElement).value, 'Keep argparse');
+  assert.equal(($('.requirements') as HTMLDetailsElement).open, true);
+  assert.equal((stored as { draft: string }).draft, 'Add a delete command', 'the draft is kept like a typed one');
+});
+
+test("the mode and unit follow the chat's other view", () => {
+  init([]);
+  deliver({ type: 'prefs', mode: 'ask', unitPath: 'development' });
+  assert.ok($('button.mode.active')?.textContent === 'Ask');
+  assert.equal(($('select.unit') as HTMLSelectElement).value, 'development');
+  assert.equal(($('.requirements') as HTMLElement).hidden, true);
+});
+
 test('removing items and an empty chat', () => {
   init([run]);
   deliver({ type: 'remove', ids: ['r1'] });

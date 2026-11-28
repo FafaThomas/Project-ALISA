@@ -717,6 +717,13 @@ def _generate_migrations(session: Session, python_env: testrun.PythonEnv, verifi
     verification.checks.append(f"migrations generated: {', '.join(sorted(created))}")
 
 
+def _failure_key(problem: dict[str, str]) -> tuple[str, str, str]:
+    """The same failure again: same file and check, same last line (the error), line numbers aside."""
+    lines = [line.strip() for line in problem.get("detail", "").splitlines() if line.strip()]
+    last = re.sub(r"\bline \d+", "line N", lines[-1]) if lines else ""
+    return problem.get("path", ""), problem.get("check", ""), last
+
+
 def verify_and_repair(session: Session, max_repairs: int) -> None:
     if not session.builders_ran and not len(session.changes):
         return
@@ -727,12 +734,17 @@ def verify_and_repair(session: Session, max_repairs: int) -> None:
     while not verification.passed and attempt < max_repairs and repairer is not None:
         attempt += 1
         session.emit({"event": "role_started", "division": repairer.division, "role": repairer.id,
-                      "phase": "repair", "attempt": attempt})
+                      "phase": "repair", "attempt": attempt, "max_attempts": max_repairs})
+        before = {_failure_key(p) for p in verification.problems}
         output = session.executor(repairer).repair(
             session.request, verification.problems, session.changes, session.board)
         session.record(output, repairer.division)
         verification = _check(session, repairer, test_mode)
         verification.checks.append(f"after repair attempt {attempt}")
+        # A small model can "fix" an error by commenting on it; the next round is told it did not work.
+        for problem in verification.problems:
+            if _failure_key(problem) in before:
+                problem["repeated"] = f"after repair round {attempt}"
     # Soft problems left after repairs are reported, not blocking: removing code may be what the task wants,
     # and a planned test command can be wrong too (unless CODING_AGENT_TEST_RUN=block).
     # The import check runs the code like the test run does, so it follows the same mode.

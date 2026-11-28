@@ -7,6 +7,17 @@ hangs (no exit within the timeout) or ends in a Python traceback becomes a
 repair problem, like a compile error. A program that exits with its own error
 message is not a failure: that can be correct behaviour.
 
+Some programs run until they are stopped, and that is not a hang: a server
+that has started, and a game or a desktop or terminal UI (pygame, tkinter,
+curses ...), which waits for its user. Such a program still running at the
+timeout, without a traceback, started fine. SDL programs (pygame) run with no
+window and no sound, so nothing appears on the user's screen.
+
+The other way round, a game or UI with an event loop that ends by itself
+(started with no arguments, no input given) is a bug: it would close on its
+user too. That is how quitting at game over, after a number of steps, or on
+detecting a test environment shows up (``closed_by_itself``).
+
 Safety:
 
 - only ``python <project .py file> ...`` or ``python -m <project module> ...``,
@@ -44,6 +55,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
@@ -62,6 +74,19 @@ _SERVER_SUBCOMMANDS = {"runserver", "runserver_plus", "runworker", "testserver",
 _SERVING_TEXT = re.compile(
     r"Starting development server|Quit the server with|Running on https?://|Serving HTTP on|Listening (?:at|on)|"
     r"Uvicorn running on|Booting worker|Application startup complete", re.I)
+# Libraries whose programs run until their user quits: games, desktop and terminal UIs.
+_INTERACTIVE_LIBS = (r"pygame|pygame_gui|pyglet|arcade|ursina|panda3d|pyray|raylib|tkinter|customtkinter|turtle|"
+                     r"curses|PyQt5|PyQt6|PySide2|PySide6|kivy|wx|textual|urwid|flet|dearpygui")
+_INTERACTIVE_IMPORT = re.compile(
+    rf"(?m)^\s*(?:from\s+({_INTERACTIVE_LIBS})\b|import\s+(?:[\w.]+(?:\s+as\s+\w+)?\s*,\s*)*({_INTERACTIVE_LIBS})\b)")
+_IMPORT = re.compile(r"(?m)^\s*(?:from\s+(\.*[\w.]*)\s+import\b|import\s+([\w.]+(?:\s+as\s+\w+)?"
+                     r"(?:\s*,\s*[\w.]+(?:\s+as\s+\w+)?)*))")
+# Calls that wait for or read the user's input: an event loop. A program that uses a game or UI library only to
+# draw something and exit (rendering an image, say) has none of these, and may end by itself.
+_READS_INPUT = re.compile(
+    r"\bevent\.(?:get|wait|poll)\(|\bget_pressed\(|mainloop\(|\b(?:getch|getkey|get_wch)\(|\bexec_?\(\)|"
+    r"\b(?:app|arcade|pyglet\.app|base)\.run\(|\w*App\([^)]*\)\.run\(|\bexitonclick\(|\bturtle\.done\(|"
+    r"\bstart_dearpygui\(|\b(?:window_should_close|WindowShouldClose)\(|\b(?:ft|flet)\.app\(")
 
 
 @dataclass
@@ -160,6 +185,8 @@ def sandbox_env(project: Path) -> dict[str, str]:
         "TEMP": tmp, "TMP": tmp, "TMPDIR": tmp,
         # No database server runs here: make PostgreSQL clients give up quickly instead of hanging.
         "PGCONNECT_TIMEOUT": "3",
+        # Games on SDL (pygame) run without a window or sound: nothing appears on the user's screen.
+        "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "PYGAME_HIDE_SUPPORT_PROMPT": "1",
     }
     for name in ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "LANG", "LC_ALL", "TZ"):
         if os.environ.get(name):
@@ -488,11 +515,138 @@ def _last_error(stderr: str) -> str:
     return lines[-1] if lines else ""
 
 
-def classify(result: CommandResult, env: PythonEnv, project: Path, folder: str) -> None:
-    """Mark a crash that only shows a missing service or package as unavailable, not as a bug."""
-    if result.timed_out and not result.crashed and _SERVING_TEXT.search(f"{result.stdout}\n{result.stderr}"):
-        result.unavailable = "started a server that runs until stopped (it started fine; not a hang)"
+def _program_sources(entry: Path, project: Path, depth: int = 3):
+    """The text of ``entry`` and of the project modules it imports, up to ``depth`` imports away."""
+    seen: set[Path] = set()
+    queue = [(entry, 0)]
+    while queue:
+        path, level = queue.pop(0)
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        yield text
+        if level >= depth:
+            continue
+        for source, plain in _IMPORT.findall(text):
+            names = [source.lstrip(".")] if source else [part.split()[0] for part in plain.split(",")]
+            for name in filter(None, names):
+                rel = name.replace(".", "/")
+                for base in (path.parent, project):
+                    queue += [(base / f"{rel}.py", level + 1), (base / rel / "__init__.py", level + 1)]
+
+
+def interactive_library(entry: Path, project: Path, depth: int = 3) -> str:
+    """The game or UI library ``entry`` is built on, directly or through the project modules it imports
+    (up to ``depth`` imports away), or "" when it has none."""
+    for text in _program_sources(entry, project, depth):
+        found = _INTERACTIVE_IMPORT.search(text)
+        if found:
+            return found.group(1) or found.group(2)
+    return ""
+
+
+# Runs a command again with Python reporting exceptions that project code caught itself (3.12+:
+# sys.monitoring). argv after -c: the project root, then the script (or -m module) and its arguments.
+CAUGHT_MARK = "[test run] The program caught this exception itself, so only its message (if any) was printed:"
+_CAUGHT_BOOTSTRAP = r'''
+import os, runpy, sys, traceback
+project = os.path.normcase(os.path.abspath(sys.argv.pop(1)))
+caught = []
+IGNORED = (ImportError, StopIteration, StopAsyncIteration, GeneratorExit, KeyboardInterrupt, SystemExit)
+
+def handled(code, offset, exc):
+    name = code.co_filename  # "<frozen importlib._bootstrap>" and the like are Python's own, not files
+    if name.startswith("<") or isinstance(exc, IGNORED):
         return
+    if os.path.normcase(os.path.abspath(name)).startswith(project):
+        caught[:] = [exc]
+
+monitoring = getattr(sys, "monitoring", None)
+if monitoring is not None:
+    tool = monitoring.DEBUGGER_ID
+    monitoring.use_tool_id(tool, "forge-testrun")
+    monitoring.register_callback(tool, monitoring.events.EXCEPTION_HANDLED, handled)
+    monitoring.set_events(tool, monitoring.events.EXCEPTION_HANDLED)
+try:
+    if sys.argv[1] == "-m":
+        sys.argv = sys.argv[2:]
+        runpy.run_module(sys.argv[0], run_name="__main__", alter_sys=True)
+    else:
+        sys.argv = sys.argv[1:]
+        sys.path[0] = os.path.dirname(os.path.abspath(sys.argv[0]))
+        runpy.run_path(sys.argv[0], run_name="__main__")
+finally:
+    if monitoring is not None:
+        monitoring.set_events(tool, 0)
+    if caught:
+        sys.stderr.write("\n" + MARK + "\n" + "".join(traceback.format_exception(caught[0])))
+'''
+
+
+def caught_exception(argv: list[str], cwd: Path, env: dict[str, str], seconds: float, project: Path) -> str:
+    """The traceback of the last exception project code caught itself, from one more run of the command.
+
+    A program that wraps everything in ``except Exception: print(...)`` hides where it failed: the
+    repairer sees "an unexpected error occurred" and nothing else. Empty without Python 3.12, or when
+    nothing was caught.
+    """
+    bootstrap = _CAUGHT_BOOTSTRAP.replace("MARK", repr(CAUGHT_MARK))
+    _, _, stderr, _ = _run_one([*argv[:3], "-c", bootstrap, str(project), *argv[3:]], cwd, env, seconds,
+                               project.parent / "tmp")
+    return stderr[stderr.index(CAUGHT_MARK):].strip() if CAUGHT_MARK in stderr else ""
+
+
+def closed_by_itself(argv: list[str], entry: Path | None, project: Path, result: CommandResult,
+                     seconds: float) -> str:
+    """Why a game or UI that ended with no input is a bug, or "" when it is not one.
+
+    Started the way its user starts it (no arguments), a program with an event loop must wait for its
+    user: ending by itself here means it ends on its user too. A model told that a game "hung" makes
+    it quit at game over, after a number of steps, or when it detects a test environment; this catches
+    every one of those. Programs given arguments (``--help``) and ones that only draw and exit are left
+    alone, so nothing is pushed to run forever that should not.
+    """
+    plain = len(argv) == (5 if argv[3] == "-m" else 4)
+    if not plain or entry is None or result.timed_out or result.crashed or result.skipped:
+        return ""
+    library = interactive_library(entry, project)
+    if not library or not any(_READS_INPUT.search(text) for text in _program_sources(entry, project)):
+        return ""
+    how = "closed on its own" if result.exit_code == 0 else f"stopped with exit code {result.exit_code}"
+    return (f"this {library} program {how} after {seconds:.1f}s with no keyboard or mouse input. A game or UI "
+            "must keep running until its user quits; it would close on its user the same way.")
+
+
+QUIT_ADVICE = ("Look for code that ends it at game over, after a number of steps or frames, or when it detects a "
+               "test or headless environment, and remove it")
+CAUGHT_ADVICE = ("It closed because of the exception below, which the program caught itself: fix its cause in the "
+                 "file and line the traceback ends at")
+
+
+def _entry_file(argv: list[str], project: Path, folder: str) -> Path | None:
+    """The project file a validated command runs (see ``to_argv``)."""
+    if argv[3] == "-m":
+        module = argv[4].replace(".", "/")
+        return next((p for p in (project / f"{module}.py", project / module / "__main__.py") if p.is_file()), None)
+    return (project / folder / argv[3]) if folder != "." else project / argv[3]
+
+
+def classify(result: CommandResult, env: PythonEnv, project: Path, folder: str, entry: Path | None = None) -> None:
+    """Mark a crash that only shows a missing service or package as unavailable, not as a bug, and a
+    program that runs until stopped (a server, a game, a UI) as started fine rather than hung."""
+    if result.timed_out and not result.crashed:
+        if _SERVING_TEXT.search(f"{result.stdout}\n{result.stderr}"):
+            result.unavailable = "started a server that runs until stopped (it started fine; not a hang)"
+            return
+        library = interactive_library(entry, project) if entry else ""
+        if library:
+            result.unavailable = (f"a {library} program that runs until its user quits: it ran without crashing "
+                                  "until the time limit, with no keyboard or mouse input (not a hang)")
+            return
     if not (result.crashed or result.reported):
         return
     last = _last_error(result.stderr)
@@ -570,8 +724,10 @@ def run_commands(changes: ChangeSet, commands: list[dict[str, str]], seconds: fl
                 continue
             if folder != ".":
                 result.ran_as = f"cd {folder} && {command}"
+            started = time.monotonic()
             result.exit_code, result.stdout, result.stderr, result.timed_out = _run_one(
                 argv, project / folder, variables, seconds, project.parent / "tmp")
+            ran_for = time.monotonic() - started
             result.reported = reported_errors(command, result)
             for attr in ("stdout", "stderr"):
                 text = getattr(result, attr).replace(str(project) + os.sep, "").replace(str(project), ".")
@@ -579,7 +735,16 @@ def run_commands(changes: ChangeSet, commands: list[dict[str, str]], seconds: fl
                 if attr == "stderr" and TRACEBACK in text and TRACEBACK not in tail:
                     tail = f"{TRACEBACK}\n  ... [earlier frames cut]\n{tail}"
                 setattr(result, attr, tail)
-            classify(result, env, project, folder)
+            entry = _entry_file(argv, project, folder)
+            classify(result, env, project, folder, entry)
+            if not (result.reported or result.unavailable):
+                closed = closed_by_itself(argv, entry, project, result, ran_for)
+                if closed:  # show where it failed, when it hid that behind a catch-all
+                    caught = caught_exception(argv, project / folder, variables, seconds, project)
+                    caught = caught.replace(str(project) + os.sep, "").replace(str(project), ".")[-OUTPUT_TAIL:]
+                    if caught:
+                        result.stderr = f"{result.stderr.rstrip()}\n{caught}".strip()
+                    result.reported = f"{closed} {CAUGHT_ADVICE if caught else QUIT_ADVICE}"
             results.append(result)
     finally:
         shutil.rmtree(project.parent, ignore_errors=True)
@@ -872,7 +1037,8 @@ def problems_from(results: list[CommandResult], changes: ChangeSet, seconds: flo
                 script = f"{folder}/{script}"
             path = script or (changes.paths() or ["?"])[0]
         what = (f"hung: no exit within {seconds:.0f}s" if result.timed_out else
-                "crashed with a traceback" if result.crashed else f"failed: {result.reported}")
+                "crashed with a traceback" if result.crashed and CAUGHT_MARK not in result.stderr else
+                f"failed: {result.reported}")
         if missing and requirements and path in requirements:
             what += f" (package '{missing.split('.')[0]}' is imported but not listed in {path})"
         output = result.stderr if result.stderr.strip() else result.stdout

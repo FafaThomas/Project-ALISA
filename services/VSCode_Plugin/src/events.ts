@@ -73,7 +73,8 @@ export function describeEvent(event: AgentEvent, names: Names): TimelineEntry | 
     case 'role_started': {
       let text = name(names, e.role);
       if (e.phase === 'repair') {
-        text += ` repairing${e.attempt ? ` (round ${str(e.attempt)})` : ''}`;
+        const of = e.max_attempts ? ` of ${str(e.max_attempts)}` : '';
+        text += ` repairing${e.attempt ? ` (round ${str(e.attempt)}${of})` : ''}`;
       } else if (e.phase === 'test-plan') {
         text += ' planning the test run';
       } else if (e.work_item) {
@@ -218,11 +219,42 @@ export function summarizeReport(report: RunReport): RunSummary {
   };
 }
 
-/** One line about a finished run, used as the agent's turn in later questions. */
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 3)}...` : text);
+
+const RUN_OUTCOMES: Record<string, string> = {
+  proposed: 'proposed; the user has not applied it, so nothing is written yet',
+  applied: 'applied by the user; its changes are written',
+  completed: 'finished; its changes are written',
+  discarded: 'proposal discarded by the user; nothing was written',
+  failed: 'failed',
+  interrupted: 'stopped before it finished',
+};
+const MAX_TURN = 2000;
+
+/**
+ * A finished run as the agent's turn in the chat history later messages carry (questions and runs):
+ * what it was for, how it ended and what went wrong, so "fix it" has something to point at.
+ */
 export function runAsTurn(task: string, summary: RunSummary | null, status: string): string {
+  const lines = [`Code run for "${clip(task, 200)}": ${RUN_OUTCOMES[status] ?? status}.`];
   if (!summary) {
-    return `Run on "${task.slice(0, 200)}": ${status}.`;
+    return lines[0];
   }
-  const files = summary.changes.map((c) => `${c.action} ${c.path}`).join(', ');
-  return `Run on "${task.slice(0, 200)}": ${status}${files ? `; changes: ${files}` : ''}${summary.error ? `; error: ${summary.error}` : ''}.`;
+  if (summary.changes.length) {
+    lines.push(clip(`Files: ${summary.changes.map((c) => `${c.action} ${c.path}`).join(', ')}`, 400));
+  }
+  if (summary.error) {
+    lines.push(`Error: ${clip(summary.error, 300)}`);
+  }
+  const problems = summary.gate && !summary.gate.passed ? summary.gate.problems : [];
+  for (const p of problems.slice(0, 3)) {
+    lines.push(`- files gate: ${p.path} [${p.check}] ${clip(p.detail, 250)}`);
+  }
+  for (const t of summary.tests.filter((t) => /^(HUNG|CRASHED|ERRORS)/.test(t.status)).slice(0, 3)) {
+    lines.push(`- test run: ${clip(t.command, 120)}: ${t.status}`);
+  }
+  for (const f of summary.findings.filter((f) => f.severity === 'high' || f.severity === 'critical').slice(0, 3)) {
+    lines.push(`- review (${f.severity}): ${f.file ? `${f.file}: ` : ''}${clip(f.issue, 150)}`);
+  }
+  return clip(lines.join('\n'), MAX_TURN);
 }

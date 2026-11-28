@@ -351,4 +351,4 @@ def test_a_server_that_started_and_was_stopped_is_not_a_hang(tmp_path):
 
 def test_the_test_plan_forbids_servers():
     from coding_agent.core.prompts import TEST_PLAN_INSTRUCTIONS
-    assert "never start a server" in TEST_PLAN_INSTRUCTIONS
+    assert "Never start a server" in TEST_PLAN_INSTRUCTIONS

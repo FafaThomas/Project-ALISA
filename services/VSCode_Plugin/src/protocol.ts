@@ -106,7 +106,9 @@ export interface RunPayload {
   acceptance_criteria?: string[];
   fix_review_findings?: boolean;
   max_team_size?: number;
+  max_repairs?: number; // 0 to 10; absent: the agent's default (2)
   target_environment?: string;
+  history?: ChatTurn[]; // the chat before this task, oldest first
 }
 
 export interface ChatTurn {
@@ -166,6 +168,16 @@ export interface RunSummary {
 export type ItemStatus =
   | 'queued' | 'running' | 'completed' | 'proposed' | 'failed' | 'interrupted' | 'applied' | 'discarded';
 
+/** What a message asked for. Its reply keeps it, so the message can be sent again or edited. */
+export interface SentRequest {
+  text: string;
+  unitPath: string;
+  files: string[]; // attached by the user
+  focusFiles: string[]; // Ask: every file shared with the answering specialist, the active editor's included
+  constraints: string[];
+  acceptance: string[];
+}
+
 export interface UserItem {
   type: 'user';
   id: string;
@@ -173,6 +185,7 @@ export interface UserItem {
   text: string;
   unitLabel: string;
   files: string[];
+  retry?: boolean; // sent again with Retry
 }
 
 export interface AnswerItem {
@@ -185,11 +198,13 @@ export interface AnswerItem {
   role: string;
   markdown: string;
   html?: string; // rendered by the extension (escape-first), never persisted
+  retryable?: boolean; // set by the extension for the view, never persisted
   files: string[];
   notes: string[];
   model: string;
   tokens: number;
   error: string;
+  request?: SentRequest; // missing in chats saved before Retry existed
 }
 
 export interface RunItem {
@@ -206,6 +221,8 @@ export interface RunItem {
   result: RunSummary | null;
   error: string;
   appliedNotes: string[];
+  retryable?: boolean; // set by the extension for the view, never persisted
+  request?: SentRequest; // missing in chats saved before Retry existed
 }
 
 export interface NoticeItem {
@@ -251,6 +268,8 @@ export type FromView =
   | { type: 'reviewAll'; itemId: string }
   | { type: 'openFile'; workspace: string; path: string }
   | { type: 'openReport'; itemId: string }
+  | { type: 'retry'; itemId: string } // a run or answer: send its message again
+  | { type: 'edit'; itemId: string } // a user message: put it back in the composer
   | { type: 'newChat' }
   | { type: 'restartServer' }
   | { type: 'showOutput' };
@@ -275,4 +294,8 @@ export type ToView =
   | { type: 'server'; server: ServerStatus }
   | { type: 'activeFile'; path: string | null }
   | { type: 'attachments'; attachments: Attachment[] }
-  | { type: 'prefill'; text: string };
+  | { type: 'prefill'; text: string }
+  // The mode or unit changed in the chat's other view (the sidebar and the editor tab show one chat).
+  | { type: 'prefs'; mode: Mode; unitPath: string }
+  // Edit: replace the composer's message, mode, unit and requirements.
+  | { type: 'compose'; text: string; mode: Mode; unitPath: string; constraints: string[]; acceptance: string[] };

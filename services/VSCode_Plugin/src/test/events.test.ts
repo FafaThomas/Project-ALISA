@@ -17,6 +17,8 @@ test('progress events read like the CLI', () => {
     'Python Developer on W1...');
   assert.equal(describeEvent({ event: 'role_started', role: 'debugging_specialist', phase: 'repair', attempt: 2 }, names)?.text,
     'Debugging Specialist repairing (round 2)...');
+  assert.equal(describeEvent({ event: 'role_started', role: 'debugging_specialist', phase: 'repair', attempt: 2, max_attempts: 5 }, names)?.text,
+    'Debugging Specialist repairing (round 2 of 5)...');
   const wrote = describeEvent({ event: 'role_finished', role: 'python_developer', files: ['a.py'], summary: 'core', model: 'gemma4:e4b', model_source: '.env X' }, names);
   assert.deepEqual(wrote, { kind: 'ok', text: 'Python Developer wrote a.py', detail: 'core\ngemma4:e4b (.env X)' });
   assert.equal(describeEvent({ event: 'role_finished', role: 'tech_lead', error: 'timeout' }, names)?.kind, 'error');
@@ -66,6 +68,38 @@ test('report summary drops file contents and adds up tokens', () => {
   assert.deepEqual(summary.changes, [{ path: 'a.py', action: 'create', author: 'python_developer' }]);
   assert.ok(!JSON.stringify(summary).includes('SECRET CONTENT'));
   assert.deepEqual(summary.tests, [{ command: 'python a.py', status: 'ok (exit 0)' }]);
-  assert.equal(runAsTurn('Build it', summary, 'applied'), 'Run on "Build it": applied; changes: create a.py.');
-  assert.equal(runAsTurn('Build it', null, 'interrupted'), 'Run on "Build it": interrupted.');
+  assert.equal(runAsTurn('Build it', summary, 'applied'),
+    'Code run for "Build it": applied by the user; its changes are written.\nFiles: create a.py');
+  assert.equal(runAsTurn('Build it', null, 'interrupted'), 'Code run for "Build it": stopped before it finished.');
+});
+
+test('a failed run, as a chat turn, says what went wrong', () => {
+  const summary = summarizeReport({
+    run_id: 'r', status: 'failed', task: 't', workspace: 'w', team: [], team_rationale: '', unit_level: 'agent',
+    unit_id: 'coding_agent', artifacts_dir: 'd', notes: [], warnings: [],
+    error: 'Generated files did not pass the files gate after repairs; nothing was written.',
+    changes: [{ path: 'snake/main.py', action: 'modify', author_role: 'python_developer' }],
+    verification: { passed: false, checks: [], problems: [
+      { path: 'requirements.txt', check: 'dependencies', detail: 'requirements.txt does not list packages the code needs: pygame' },
+    ] },
+    advisory_findings: [
+      { role: 'qa_lead', severity: 'high', file: 'snake/main.py', issue: 'The loop never exits on q' },
+      { role: 'qa_lead', severity: 'low', file: 'snake/main.py', issue: 'Magic numbers' },
+    ],
+    test_run: [
+      { command: 'python snake/main.py', exit_code: null, timed_out: true, skipped: '', stderr: '' },
+      { command: 'python -m pytest', exit_code: 0, timed_out: false, skipped: '', stderr: '' },
+    ],
+  } as unknown as RunReport);
+  const turn = runAsTurn('Add a pause key', summary, 'failed');
+  assert.equal(turn, [
+    'Code run for "Add a pause key": failed.',
+    'Files: modify snake/main.py',
+    'Error: Generated files did not pass the files gate after repairs; nothing was written.',
+    '- files gate: requirements.txt [dependencies] requirements.txt does not list packages the code needs: pygame',
+    '- test run: python snake/main.py: HUNG',
+    '- review (high): snake/main.py: The loop never exits on q',
+  ].join('\n'));
+  const long = runAsTurn('x'.repeat(5000), { ...summary, error: 'e'.repeat(5000) }, 'failed');
+  assert.ok(long.length <= 2000);
 });

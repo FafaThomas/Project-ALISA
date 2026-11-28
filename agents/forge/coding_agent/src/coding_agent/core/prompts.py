@@ -9,6 +9,32 @@ from .registry import RoleSpec, Tree
 _STR = {"type": "string"}
 _STR_LIST = {"type": "array", "items": _STR}
 
+# The chat before a run's task: enough to tell what "fix it" refers to, little enough to leave the
+# prompt's room for the code. Each specialist call and the Director get it.
+RUN_HISTORY_TURNS = 6
+RUN_TURN_CHARS = 2_000
+RUN_HISTORY_CHARS = 6_000
+
+
+def conversation_md(history: list[dict[str, str]]) -> str:
+    """The chat before a run's task, oldest first; the newest turns are kept when it is long."""
+    turns: list[str] = []
+    used = 0
+    for turn in reversed(history[-RUN_HISTORY_TURNS:]):
+        text = turn["text"].strip()
+        if len(text) > RUN_TURN_CHARS:
+            text = text[:RUN_TURN_CHARS].rstrip() + " [...]"
+        if turns and used + len(text) > RUN_HISTORY_CHARS:
+            break
+        turns.append(f"**{'User' if turn['role'] == 'user' else 'Agent'}:** {text}")
+        used += len(text)
+    if not turns:
+        return ""
+    return ("## Conversation before this task\n"
+            "The user's earlier messages in this chat and what came of them, oldest first. Use them to understand "
+            "the task, for example what \"it\" or \"again\" refers to. The task above is what to do now.\n\n"
+            + "\n\n".join(reversed(turns)))
+
 NOTES_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {"summary": _STR, "decisions": _STR_LIST, "concerns": _STR_LIST},
@@ -96,12 +122,16 @@ TEST_PLAN_INSTRUCTIONS = (
     "(python backend/manage.py check); a script in a subfolder runs from its own folder. The packages in the "
     "project's requirements.txt are installed, but no database server, network or other service is running: "
     "leave out commands that need one (for Django, use 'manage.py check' and commands that do not touch the "
-    "database, not migrate, runserver or test against PostgreSQL). Every command must exit on its own: never "
-    "start a server or anything that runs until stopped (runserver, gunicorn, a web app's main script, a "
-    "watcher, a worker). Run only entry points: manage.py subcommands for Django, or files that have "
+    "database, not migrate, runserver or test against PostgreSQL). Never start a server or anything else that "
+    "runs until stopped (runserver, gunicorn, a web app's main script, a watcher, a worker). The one exception "
+    "is a game or a desktop or terminal UI (pygame, tkinter, curses and the like): start it once, the way its "
+    "user would, with no arguments. It runs with no window, sound or keyboard input until the time limit; still "
+    "running then means it started fine, a traceback means it crashed, and closing by itself is a bug. Every "
+    "other command must exit on its own. "
+    "Run only entry points: manage.py subcommands for Django, or files that have "
     "if __name__ == '__main__':. Never run a module such as models.py, views.py, serializers.py or urls.py "
     "directly: it fails before its own code runs. Exercise every feature the task asked "
-    "for, the way a user would, including one realistic error case. Commands must finish in a few seconds without "
+    "for, the way a user would, including one realistic error case. Other commands must finish in a few seconds without "
     "keyboard input or network access. Use only arguments the code actually accepts; read the entry point's "
     "argument parsing first. Use concrete values only, never placeholders such as <id>: if a command needs a "
     "value the program generates at run time (a random ID, for example), leave that command out. Do not write "
@@ -139,6 +169,15 @@ SCHEMA_BY_KIND: dict[str, dict[str, Any]] = {
     "repairer": FILES_SCHEMA,
     "reviewer": FINDINGS_SCHEMA,
 }
+
+# The team's checks run the program briefly with no input; a model under pressure from a "hung" report
+# makes the program quit by itself, which breaks it for its users (a game that closes at game over).
+NO_GAMING_THE_CHECKS = (
+    "Never change what the program does for its users to get past the team's checks: do not make it quit or "
+    "stop by itself, cap how long or how many steps it runs, or act differently when it detects a test, CI or "
+    "headless environment. A game or UI that is still running when the test run's time is up started fine; "
+    "remove code that does any of this when you find it."
+)
 
 _KIND_INSTRUCTIONS: dict[str, str] = {
     "analyst": (
@@ -179,12 +218,12 @@ _KIND_INSTRUCTIONS: dict[str, str] = {
         "the backend routes it lists with the methods it lists, import every name you use, and fix the known "
         "problems it lists in your files. When a frontend call and a backend route disagree, fix the side that "
         "breaks those requirements. Write "
-        "production-quality code with no TODO stubs."
+        "production-quality code with no TODO stubs. " + NO_GAMING_THE_CHECKS
     ),
     "repairer": (
         "Fix the reported problems. Find the root cause, then return the COMPLETE corrected content of each "
         "file you change. Change only what is needed to fix the problems, and keep meeting the requirements "
-        "from earlier runs listed under 'Project facts'."
+        "from earlier runs listed under 'Project facts'. " + NO_GAMING_THE_CHECKS
     ),
     "reviewer": (
         "Review the proposed changes from your specialty only. Report concrete findings with the file, the "

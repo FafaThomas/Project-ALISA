@@ -146,6 +146,29 @@ def test_dropped_code_goes_to_repair_with_the_old_version_then_warns(tmp_path):
     assert any("removes order_create, order_detail" in w for w in report.warnings)
 
 
+@pytest.mark.parametrize("asked, rounds", [(0, 0), (3, 3), (None, 2)])
+def test_a_run_gets_the_repair_rounds_it_asks_for(tmp_path, asked, rounds):
+    broken = {"summary": "core", "files": [{"path": "calc.py", "action": "create",
+                                            "content": "def add(a, b)\n    return a + b\n"}]}
+    llm = ScriptedLLM({"python_developer": broken, "debugging_specialist": {"summary": "tried", "files": []}})
+    events = []
+    report = CodingAgent.with_client(llm).unit("python_developer").run(
+        CodingRequest(task="Add an add function", workspace=str(tmp_path), max_repairs=asked), UI, emit=events.append)
+    repairs = [e for e in events if e["event"] == "role_started" and e.get("phase") == "repair"]
+    assert [(e["attempt"], e["max_attempts"]) for e in repairs] == [(n, rounds) for n in range(1, rounds + 1)]
+    assert report.status == "failed"
+
+
+def test_repair_rounds_are_bounded_and_travel_with_the_request():
+    from coding_agent.core.models import request_to_dict
+    for bad in (-1, 11, True, "3", 2.5):
+        with pytest.raises(ValueError, match="max_repairs must be an integer from 0 to 10"):
+            CodingRequest.from_payload({"task": "x", "workspace": "w", "max_repairs": bad})
+    request = CodingRequest.from_payload({"task": "x", "workspace": "w", "max_repairs": 10})
+    assert CodingRequest.from_payload(request_to_dict(request)).max_repairs == 10
+    assert CodingRequest.from_payload({"task": "x", "workspace": "w"}).max_repairs is None
+
+
 def test_builders_are_told_to_keep_existing_code():
     from coding_agent.core.prompts import _KIND_INSTRUCTIONS
     assert "keep every function, class, export and URL route" in _KIND_INSTRUCTIONS["builder"]

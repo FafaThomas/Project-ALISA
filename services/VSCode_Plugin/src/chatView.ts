@@ -1,9 +1,11 @@
 /**
- * The chat: a webview in the ALISA sidebar. The conversation lives here, in the extension (and in
- * workspace state between sessions); the webview only draws it.
+ * The chat. The conversation lives here, in the extension (and in workspace state between sessions);
+ * webviews only draw it. It can be shown in the ALISA sidebar and in an editor tab at the same time
+ * (the tab can be made full screen or moved to its own window); both show the same conversation.
  *
  * Code mode starts a run (POST /runs) and follows it; a proposal is reviewed as diffs and written with
- * POST /proposals/apply. Ask mode puts a question to a unit (POST /ask); nothing is written.
+ * POST /proposals/apply. Ask mode puts a question to a unit (POST /ask); nothing is written. Each reply
+ * keeps its request, so Retry sends the message again and Edit puts it back in the composer.
  */
 
 import * as crypto from 'crypto';
@@ -14,23 +16,37 @@ import { AgentClient, AgentError } from './client';
 import { describeEvent, progressLabel, runAsTurn, summarizeReport } from './events';
 import { renderMarkdown } from './markdown';
 import type {
-  AnswerItem, Attachment, ChatItem, ChatTurn, FromView, JobSnapshot, Mode, RunItem, RunPayload, ToView,
+  AnswerItem, Attachment, ChatItem, ChatTurn, FromView, JobSnapshot, Mode, RunItem, SentRequest, ToView,
   UnitOption, UserItem,
 } from './protocol';
+import { canRetry, editFor, requestFor, runPayload } from './requests';
 import { AgentServer } from './server';
 import { AGENT_OPTION, flattenUnits, unitLabel, unitNames } from './units';
 
 const ITEMS_KEY = 'alisa.chat.items.v1';
 const PREFS_KEY = 'alisa.chat.prefs.v1';
+const PLACE_KEY = 'alisa.chat.place.v1';
 const MAX_ITEMS = 200;
 const MAX_TIMELINE = 400;
 const POLL_MS = 1000;
 const MAX_POLL_FAILURES = 30;
 const HISTORY_TURNS = 8;
+const PANEL_READY_MS = 10_000;
 export const EMPTY_SCHEME = 'alisa-empty';
 
 type Prefs = { mode: Mode; unitPath: string };
 type Followed = RunItem | AnswerItem;
+type SurfaceKind = 'sidebar' | 'editor';
+/** Where the user last put the chat with the ALISA commands. Show Chat brings it back there. */
+type Place = 'sidebar' | 'editor' | 'window';
+
+/** One webview showing the chat: the sidebar view or the editor tab. */
+interface Surface {
+  kind: SurfaceKind;
+  webview: vscode.Webview;
+  ready: boolean; // its script is running and has asked for the chat
+  visible: () => boolean;
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const newId = () => crypto.randomBytes(6).toString('hex');
@@ -44,13 +60,35 @@ function samePath(a: string, b: string): boolean {
   return norm(a) === norm(b);
 }
 
+/** Resolves true once ``test`` holds (checked now and on each ``event``), false after ``ms``. */
+function waitFor(event: vscode.Event<unknown>, test: () => boolean, ms: number): Promise<boolean> {
+  if (test()) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const done = (value: boolean) => {
+      clearTimeout(timer);
+      listener.dispose();
+      resolve(value);
+    };
+    const listener = event(() => {
+      if (test()) {
+        done(true);
+      }
+    });
+    const timer = setTimeout(() => done(test()), ms);
+  });
+}
+
 export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewId = 'alisa.chat';
+  static readonly panelType = 'alisa.chatPanel';
 
-  private view: vscode.WebviewView | undefined;
-  private ready = false;
+  private readonly surfaces = new Set<Surface>();
+  private panel: vscode.WebviewPanel | undefined;
   private items: ChatItem[];
   private prefs: Prefs;
+  private place: Place;
   private units: UnitOption[] = [AGENT_OPTION];
   private names = new Map<string, string>();
   private attachments: Attachment[] = [];
@@ -59,11 +97,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private saveTimer: NodeJS.Timeout | undefined;
   private readonly progressChanged = new vscode.EventEmitter<void>();
   readonly onDidChangeProgress = this.progressChanged.event;
+  private readonly surfaceReady = new vscode.EventEmitter<Surface>();
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly server: AgentServer) {
     this.items = context.workspaceState.get<ChatItem[]>(ITEMS_KEY, []);
     this.prefs = context.workspaceState.get<Prefs>(PREFS_KEY, { mode: 'code', unitPath: '' });
+    this.place = context.workspaceState.get<Place>(PLACE_KEY, 'sidebar');
     this.disposables.push(
       server.onDidChange((status) => {
         this.post({ type: 'server', server: status });
@@ -80,29 +120,62 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.flushSave();
     this.disposables.forEach((d) => d.dispose());
     this.progressChanged.dispose();
+    this.surfaceReady.dispose();
   }
 
-  // ------------------------------------------------------------------ webview
+  // ----------------------------------------------------------------- surfaces
+  private get media(): vscode.Uri {
+    return vscode.Uri.joinPath(this.context.extensionUri, 'media');
+  }
+
   resolveWebviewView(view: vscode.WebviewView): void {
-    this.view = view;
-    this.ready = false;
-    const media = vscode.Uri.joinPath(this.context.extensionUri, 'media');
-    view.webview.options = { enableScripts: true, localResourceRoots: [media] };
-    view.webview.html = this.html(view.webview, media);
-    view.webview.onDidReceiveMessage((message: FromView) => {
-      this.onMessage(message).catch((error) => void vscode.window.showErrorMessage(`ALISA: ${errorText(error)}`));
-    }, undefined, this.disposables);
-    view.onDidDispose(() => {
-      this.view = undefined;
-      this.ready = false;
-    }, undefined, this.disposables);
-    void this.server.client().catch(() => undefined); // connect early; failures show in the view
+    this.attach('sidebar', view.webview, () => view.visible, view.onDidDispose, view.onDidChangeVisibility);
   }
 
-  private html(webview: vscode.Webview, media: vscode.Uri): string {
+  /** An editor tab VS Code restored after a reload (see the serializer in extension.ts). */
+  restorePanel(panel: vscode.WebviewPanel): void {
+    this.panel = panel;
+    panel.iconPath = {
+      light: vscode.Uri.joinPath(this.media, 'alisa-light.svg'),
+      dark: vscode.Uri.joinPath(this.media, 'alisa-dark.svg'),
+    };
+    panel.onDidDispose(() => {
+      if (this.panel === panel) {
+        this.panel = undefined;
+      }
+    });
+    this.attach('editor', panel.webview, () => panel.visible, panel.onDidDispose, panel.onDidChangeViewState);
+  }
+
+  private attach(kind: SurfaceKind, webview: vscode.Webview, visible: () => boolean,
+    onDidDispose: vscode.Event<void>, onDidChangeVisibility: vscode.Event<unknown>): Surface {
+    const surface: Surface = { kind, webview, ready: false, visible };
+    webview.options = { enableScripts: true, localResourceRoots: [this.media] };
+    webview.html = this.html(webview, kind);
+    const listeners = [
+      webview.onDidReceiveMessage((message: FromView) => {
+        this.onMessage(message, surface).catch((error) => void vscode.window.showErrorMessage(`ALISA: ${errorText(error)}`));
+      }),
+      // A hidden webview loses its page; it asks for the chat again when it is shown.
+      onDidChangeVisibility(() => {
+        if (!visible()) {
+          surface.ready = false;
+        }
+      }),
+    ];
+    onDidDispose(() => {
+      this.surfaces.delete(surface);
+      listeners.forEach((l) => l.dispose());
+    });
+    this.surfaces.add(surface);
+    void this.server.client().catch(() => undefined); // connect early; failures show in the view
+    return surface;
+  }
+
+  private html(webview: vscode.Webview, kind: SurfaceKind): string {
     const nonce = crypto.randomBytes(16).toString('base64');
-    const css = webview.asWebviewUri(vscode.Uri.joinPath(media, 'chat.css'));
-    const js = webview.asWebviewUri(vscode.Uri.joinPath(media, 'chat.js'));
+    const css = webview.asWebviewUri(vscode.Uri.joinPath(this.media, 'chat.css'));
+    const js = webview.asWebviewUri(vscode.Uri.joinPath(this.media, 'chat.js'));
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -112,52 +185,146 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 <link rel="stylesheet" href="${css}">
 <title>ALISA Coding Agent</title>
 </head>
-<body>
+<body data-surface="${kind}">
 <div id="app"></div>
 <script nonce="${nonce}" src="${js}"></script>
 </body>
 </html>`;
   }
 
-  private post(message: ToView): void {
-    if (this.view && this.ready) {
-      void this.view.webview.postMessage(message);
+  /** Show the chat where it is open: the editor tab when there is one, else the sidebar. */
+  async reveal(): Promise<void> {
+    if (this.panel) {
+      this.panel.reveal(undefined, false);
+      return;
+    }
+    await vscode.commands.executeCommand(`${ChatViewProvider.viewId}.focus`);
+  }
+
+  /**
+   * Show Chat (the status bar item): the chat where the user last put it. A closed tab or window is
+   * opened again, so closing the chat's window doesn't leave it only in the sidebar.
+   */
+  async show(): Promise<void> {
+    if (this.panel || this.place === 'sidebar') {
+      await this.reveal();
+    } else if (this.place === 'window') {
+      await this.openInNewWindow();
+    } else {
+      await this.openInEditor();
+    }
+  }
+
+  async showInSidebar(): Promise<void> {
+    this.setPlace('sidebar');
+    await vscode.commands.executeCommand(`${ChatViewProvider.viewId}.focus`);
+  }
+
+  private setPlace(place: Place): void {
+    this.place = place;
+    void this.context.workspaceState.update(PLACE_KEY, place);
+  }
+
+  /** The chat in an editor tab. An open tab stays where it is, which may be a window of its own. */
+  async openInEditor(): Promise<void> {
+    const created = !this.panel;
+    if (await this.showPanel() && created) {
+      this.setPlace('editor');
+    }
+  }
+
+  /** Show the chat in an editor tab, and wait until it is the active editor (VS Code's window and
+   *  layout commands act on the active editor). Undefined when the tab did not open in time. */
+  private async showPanel(): Promise<vscode.WebviewPanel | undefined> {
+    const existing = this.panel;
+    if (existing) {
+      const activated = waitFor(existing.onDidChangeViewState, () => existing.active, PANEL_READY_MS);
+      existing.reveal(undefined, false);
+      return (await activated) ? existing : undefined;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      ChatViewProvider.panelType, 'ALISA Chat', { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
+      { enableScripts: true, localResourceRoots: [this.media] });
+    this.restorePanel(panel);
+    // ``panel.active`` is true from the start; the page asking for the chat shows the tab really opened.
+    const surface = [...this.surfaces].find((s) => s.webview === panel.webview);
+    const opened = surface && await waitFor(this.surfaceReady.event, () => surface.ready, PANEL_READY_MS);
+    return opened ? panel : undefined;
+  }
+
+  /** The chat in an editor tab of its own window. */
+  async openInNewWindow(): Promise<void> {
+    if (await this.showPanel()) {
+      await vscode.commands.executeCommand('workbench.action.moveEditorToNewWindow');
+      this.setPlace('window');
+    } else {
+      void vscode.window.showWarningMessage('ALISA: the chat tab did not open in time, so it was not moved. Try again.');
+    }
+  }
+
+  /**
+   * The chat full screen: its editor tab in Zen Mode (run again, or press Esc twice, to leave). Zen Mode
+   * is the main window's and VS Code turns it off while another window has focus, so the chat in a
+   * window of its own makes that window full screen instead (the chat window's title bar has its own
+   * button for this, which also works when the tab was dragged out).
+   */
+  async toggleFullScreen(): Promise<void> {
+    if (this.panel && this.place === 'window') {
+      if (await this.showPanel()) {
+        await vscode.commands.executeCommand('workbench.action.toggleFullScreen');
+      }
+      return;
+    }
+    await this.openInEditor();
+    await vscode.commands.executeCommand('workbench.action.toggleZenMode');
+  }
+
+  // ------------------------------------------------------------------ webview
+  /** To every surface showing the chat, or to ``only``. */
+  private post(message: ToView, only?: Surface): void {
+    for (const surface of only ? [only] : this.surfaces) {
+      if (surface.ready) {
+        void surface.webview.postMessage(message);
+      }
     }
   }
 
   private toView(item: ChatItem): ChatItem {
-    return item.type === 'answer' && item.markdown ? { ...item, html: renderMarkdown(item.markdown) } : item;
+    if (item.type === 'answer') {
+      return { ...item, html: item.markdown ? renderMarkdown(item.markdown) : undefined, retryable: canRetry(this.items, item) };
+    }
+    return item.type === 'run' ? { ...item, retryable: canRetry(this.items, item) } : item;
   }
 
-  private sendInit(): void {
+  private sendInit(only?: Surface): void {
     this.post({
       type: 'init', items: this.items.map((i) => this.toView(i)), units: this.units, mode: this.prefs.mode,
       unitPath: this.prefs.unitPath, server: this.server.status, activeFile: this.activeFile()?.path ?? null,
       shareActiveFile: vscode.workspace.getConfiguration('alisa.chat').get('shareActiveFile', true),
       attachments: this.attachments, autoApply: vscode.workspace.getConfiguration('alisa.run').get('autoApply', false),
-    });
-    if (this.pendingPrefill !== undefined) {
-      this.post({ type: 'prefill', text: this.pendingPrefill });
+    }, only);
+    if (only && this.pendingPrefill !== undefined) {
+      this.post({ type: 'prefill', text: this.pendingPrefill }, only);
       this.pendingPrefill = undefined;
     }
   }
 
-  private async onMessage(message: FromView): Promise<void> {
+  private async onMessage(message: FromView, surface: Surface): Promise<void> {
     switch (message.type) {
       case 'ready':
-        this.ready = true;
-        this.sendInit();
+        surface.ready = true;
+        this.sendInit(surface);
+        this.surfaceReady.fire(surface);
         if (this.server.status.state === 'ready') {
           void this.loadUnits();
         }
         return;
       case 'send':
-        return this.send(message);
+        return this.send(message, surface);
       case 'setMode':
+        return this.setPrefs({ ...this.prefs, mode: message.mode }, surface);
       case 'setUnit':
-        this.prefs = message.type === 'setMode' ? { ...this.prefs, mode: message.mode } : { ...this.prefs, unitPath: message.unitPath };
-        void this.context.workspaceState.update(PREFS_KEY, this.prefs);
-        return;
+        return this.setPrefs({ ...this.prefs, unitPath: message.unitPath }, surface);
       case 'removeAttachment':
         this.attachments = this.attachments.filter((a) => a.path !== message.path);
         this.post({ type: 'attachments', attachments: this.attachments });
@@ -173,6 +340,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         });
       case 'stop':
         return this.stop(message.itemId);
+      case 'retry':
+        return this.retry(message.itemId);
+      case 'edit':
+        return this.edit(message.itemId, surface);
       case 'openDiff':
         return this.withRun(message.itemId, (item) => this.openDiff(item, message.path));
       case 'reviewAll':
@@ -200,6 +371,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const item = this.items.find((i) => i.id === itemId);
     if (item?.type === 'run') {
       await action(item);
+    }
+  }
+
+  /** The composer's mode and unit, remembered, and shown in the chat's other surfaces. */
+  private setPrefs(prefs: Prefs, from?: Surface): void {
+    this.prefs = prefs;
+    void this.context.workspaceState.update(PREFS_KEY, prefs);
+    for (const surface of this.surfaces) {
+      if (surface !== from) {
+        this.post({ type: 'prefs', mode: prefs.mode, unitPath: prefs.unitPath }, surface);
+      }
     }
   }
 
@@ -304,15 +486,31 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     return { path: relative, label: path.basename(document.uri.fsPath) };
   }
 
-  /** Earlier turns of this chat, newest last, for follow-up questions. */
-  private history(before: string): ChatTurn[] {
+  /**
+   * Earlier turns of this chat, newest last, sent with questions and with runs so follow-ups ("fix
+   * it") can be understood. With ``skipTriesOf``, earlier tries of that question and their answers are
+   * left out, so a retried question gets a fresh answer rather than the last one again. Runs keep their
+   * earlier tries: a failed attempt tells the team what went wrong.
+   */
+  private history(before: string, skipTriesOf?: string): ChatTurn[] {
     const turns: ChatTurn[] = [];
+    let skipReply = false;
     for (const item of this.items) {
       if (item.id === before) {
         break;
       }
+      const reply = item.type === 'answer' || item.type === 'run';
+      if (skipReply && reply) {
+        skipReply = false;
+        continue;
+      }
+      skipReply = false;
       if (item.type === 'user') {
-        turns.push({ role: 'user', text: item.text });
+        if (skipTriesOf !== undefined && item.text === skipTriesOf) {
+          skipReply = true;
+        } else {
+          turns.push({ role: 'user', text: item.text });
+        }
       } else if (item.type === 'answer' && item.status === 'completed' && item.markdown) {
         turns.push({ role: 'agent', text: item.markdown });
       } else if (item.type === 'run' && !isActive(item)) {
@@ -340,17 +538,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const quote = text.trim()
       ? `${where}, lines ${selection.start.line + 1}-${lastLine}:\n\`\`\`${editor.document.languageId}\n${text.replace(/\s+$/, '')}\n\`\`\`\n`
       : '';
-    if (this.view && this.ready) {
-      this.post({ type: 'attachments', attachments: this.attachments });
-      this.post({ type: 'prefill', text: quote });
+    this.post({ type: 'attachments', attachments: this.attachments });
+    // The quote goes to one composer: the editor tab's when there is one (that is where reveal() goes).
+    const kind: SurfaceKind = this.panel ? 'editor' : 'sidebar';
+    const target = [...this.surfaces].find((s) => s.kind === kind && s.ready && s.visible());
+    if (target) {
+      this.post({ type: 'prefill', text: quote }, target);
     } else {
-      this.pendingPrefill = quote; // sent with the view's init
+      this.pendingPrefill = quote; // sent with the next surface's init
     }
-    await vscode.commands.executeCommand(`${ChatViewProvider.viewId}.focus`);
+    await this.reveal();
   }
 
   // ------------------------------------------------------------------- send
-  private async send(message: Extract<FromView, { type: 'send' }>): Promise<void> {
+  private async send(message: Extract<FromView, { type: 'send' }>, surface: Surface): Promise<void> {
     const text = message.text.trim();
     if (!text) {
       return;
@@ -360,55 +561,91 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       this.notice('error', 'Open a folder first: the coding agent works in a workspace folder.');
       return;
     }
-    this.prefs = { mode: message.mode, unitPath: message.unitPath };
-    void this.context.workspaceState.update(PREFS_KEY, this.prefs);
-    const label = unitLabel(this.units, message.unitPath);
+    this.setPrefs({ mode: message.mode, unitPath: message.unitPath }, surface);
     const files = this.attachments.map((a) => a.path);
-    const user: UserItem = { type: 'user', id: newId(), mode: message.mode, text, unitLabel: label, files };
-    this.add(user);
+    const focus = new Set(files);
+    const active = message.mode === 'ask' && message.shareActiveFile ? this.activeFile(folder) : undefined;
+    if (active) {
+      focus.add(active.path);
+    }
     this.attachments = [];
     this.post({ type: 'attachments', attachments: [] });
-    const workspace = folder.uri.fsPath;
+    await this.submit(message.mode, folder.uri.fsPath, {
+      text, unitPath: message.unitPath, files, focusFiles: message.mode === 'ask' ? [...focus] : [],
+      constraints: message.constraints, acceptance: message.acceptance,
+    });
+  }
 
-    if (message.mode === 'ask') {
-      const shared = new Set(files);
-      const active = message.shareActiveFile ? this.activeFile(folder) : undefined;
-      if (active) {
-        shared.add(active.path);
-      }
+  /** Add the message and its reply at the end of the chat, and start the run or the question. */
+  private async submit(mode: Mode, workspace: string, request: SentRequest, retry = false): Promise<void> {
+    const user: UserItem = {
+      type: 'user', id: newId(), mode, text: request.text, unitLabel: unitLabel(this.units, request.unitPath), files: request.files,
+    };
+    if (retry) {
+      user.retry = true;
+    }
+    this.add(user);
+
+    if (mode === 'ask') {
       const item: AnswerItem = {
-        type: 'answer', id: newId(), jobId: '', workspace, unitPath: message.unitPath, status: 'queued', role: '',
-        markdown: '', files: [], notes: [], model: '', tokens: 0, error: '',
+        type: 'answer', id: newId(), jobId: '', workspace, unitPath: request.unitPath, status: 'queued', role: '',
+        markdown: '', files: [], notes: [], model: '', tokens: 0, error: '', request,
       };
       this.add(item);
-      await this.startJob(item, (client) => client.startAsk(
-        { question: text, workspace, history: this.history(user.id), focus_files: [...shared] }, message.unitPath));
+      await this.startJob(item, (client) => client.startAsk({
+        question: request.text, workspace, history: this.history(user.id, request.text), focus_files: request.focusFiles,
+      }, request.unitPath));
       return;
     }
 
     const config = vscode.workspace.getConfiguration('alisa.run');
-    const payload: RunPayload = {
-      task: files.length ? `${text}\n\nFiles this refers to: ${files.join(', ')}` : text,
-      workspace,
-      mode: config.get('autoApply', false) ? 'apply' : 'propose',
-      constraints: message.constraints,
-      acceptance_criteria: message.acceptance,
-      fix_review_findings: config.get('fixReviewFindings', false),
-    };
-    const maxTeam = config.get<number | null>('maxTeamSize');
-    if (maxTeam) {
-      payload.max_team_size = maxTeam;
-    }
-    const target = (config.get<string>('targetEnvironment') ?? '').trim();
-    if (target) {
-      payload.target_environment = target;
-    }
+    const payload = runPayload(request, workspace, {
+      autoApply: config.get('autoApply', false),
+      fixReviewFindings: config.get('fixReviewFindings', false),
+      maxTeamSize: config.get<number | null>('maxTeamSize'),
+      maxRepairs: config.get<number | null>('maxRepairs'),
+      targetEnvironment: config.get<string>('targetEnvironment') ?? '',
+    }, this.history(user.id));
     const item: RunItem = {
-      type: 'run', id: newId(), jobId: '', workspace, task: text, unitLabel: label, status: 'queued',
-      progress: 'starting the service', timeline: [], seen: 0, result: null, error: '', appliedNotes: [],
+      type: 'run', id: newId(), jobId: '', workspace, task: request.text, unitLabel: user.unitLabel, status: 'queued',
+      progress: 'starting the service', timeline: [], seen: 0, result: null, error: '', appliedNotes: [], request,
     };
     this.add(item);
-    await this.startJob(item, (client) => client.startRun(payload, message.unitPath));
+    await this.startJob(item, (client) => client.startRun(payload, request.unitPath));
+  }
+
+  /** Retry: the reply's message again, to the same unit and workspace, as a new turn. */
+  private async retry(itemId: string): Promise<void> {
+    const item = this.items.find((i) => i.id === itemId);
+    if (!item || !canRetry(this.items, item)) {
+      return;
+    }
+    const request = requestFor(this.items, item, this.units);
+    if (!request) {
+      this.notice('error', 'This message can not be sent again: the unit it went to is not in the list. Edit it and send it instead.');
+      return;
+    }
+    if (item.type === 'run' && item.status === 'proposed') {
+      item.status = 'discarded'; // the new try replaces this proposal
+      this.update(item);
+    }
+    await this.submit(item.type === 'run' ? 'code' : 'ask', item.workspace, request, true);
+  }
+
+  /** Edit: a message back in the composer that asked for it, with its mode, unit, files and requirements. */
+  private edit(itemId: string, surface: Surface): void {
+    const user = this.items.find((i) => i.id === itemId);
+    if (user?.type !== 'user') {
+      return;
+    }
+    const { mode, request } = editFor(this.items, user, this.units);
+    this.setPrefs({ mode, unitPath: request.unitPath }, surface);
+    this.attachments = request.files.map((file) => ({ path: file, label: path.posix.basename(file) }));
+    this.post({ type: 'attachments', attachments: this.attachments });
+    this.post({
+      type: 'compose', text: request.text, mode, unitPath: request.unitPath,
+      constraints: request.constraints, acceptance: request.acceptance,
+    }, surface);
   }
 
   private async startJob(item: Followed, start: (client: AgentClient) => Promise<JobSnapshot>): Promise<void> {
@@ -531,7 +768,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
   /** Tell the user about a finished job when the chat is not in view. */
   private announce(item: Followed): void {
-    if (this.view?.visible) {
+    if ([...this.surfaces].some((s) => s.visible())) {
       return;
     }
     let message: string;
@@ -547,7 +784,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const show = item.status === 'failed' ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
     void show(message, 'Open Chat').then((choice) => {
       if (choice) {
-        void vscode.commands.executeCommand(`${ChatViewProvider.viewId}.focus`);
+        void this.show();
       }
     });
   }

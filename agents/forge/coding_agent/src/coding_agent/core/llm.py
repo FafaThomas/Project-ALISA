@@ -72,11 +72,12 @@ class RateLimitError(ProviderUnavailableError):
     """A hosted provider refused the call for quota or rate-limit reasons."""
 
 
-REMOTE_PREFIXES = ("gemini:",)
+REMOTE_PREFIXES = ("gemini:", "openai:")
 
 
 def split_provider(model: str) -> tuple[str, str]:
-    """('gemini', 'gemini-2.5-flash') for 'gemini:gemini-2.5-flash'; ('ollama', model) otherwise."""
+    """('gemini', 'gemini-2.5-flash') for 'gemini:gemini-2.5-flash', ('openai', name) for 'openai:<name>';
+    ('ollama', model) otherwise."""
     for prefix in REMOTE_PREFIXES + ("ollama:",):
         if model.startswith(prefix):
             return prefix[:-1], model[len(prefix):]
@@ -97,19 +98,24 @@ def resolve_alias(model: str) -> tuple[str, str]:
 
 
 def hosted_fallback_model(provider: str) -> str | None:
-    """``FORGE_GEMINI_FALLBACK_MODEL``: another hosted model to try before the local one, or None."""
+    """``FORGE_<PROVIDER>_FALLBACK_MODEL``: another hosted model to try before the local one, or None.
+
+    Without a prefix it is the same provider's (``@general``). With one it may be another provider's
+    (``gemini:@general`` behind ``openai:``), so one provider being down or unpaid falls back to the
+    other before the local model. A local (Ollama) value is ignored: the local fallback comes next anyway.
+    """
     load_local_env()
     value = env_value(f"FORGE_{provider.upper()}_FALLBACK_MODEL")
     if not value:
         return None
-    if ":" not in value:
+    if not value.startswith(REMOTE_PREFIXES + ("ollama:",)):
         value = f"{provider}:{value}"
     try:
         resolved, _ = resolve_alias(value)
     except LLMError as exc:
         LOGGER.warning("ignoring FORGE_%s_FALLBACK_MODEL: %s", provider.upper(), exc)
         return None
-    return resolved if split_provider(resolved)[0] == provider else None
+    return resolved if split_provider(resolved)[0] != "ollama" else None
 
 
 def default_client_factory(model: str) -> "LLMClient":
@@ -118,6 +124,10 @@ def default_client_factory(model: str) -> "LLMClient":
         from .gemini import GeminiClient
 
         return GeminiClient(name)
+    if provider == "openai":
+        from .openai_compat import OpenAICompatClient
+
+        return OpenAICompatClient(name)
     return OllamaClient(name)
 
 

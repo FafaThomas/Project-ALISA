@@ -59,6 +59,22 @@ class InvocationContext:
 
 ApplyMode = Literal["propose", "apply"]
 
+# Chat turns an API caller may send with a run or a question.
+MAX_HISTORY_TURNS = 20
+MAX_TURN_CHARS = 4_000
+# Each repair round is a model call and another check; more than this and a stuck run loops for long.
+MAX_REPAIR_ROUNDS = 10
+
+
+def parse_history(value: Any) -> list[dict[str, str]]:
+    """Chat turns from an untrusted payload: the last MAX_HISTORY_TURNS, each cut to MAX_TURN_CHARS."""
+    value = value or []
+    if not isinstance(value, list) or not all(
+            isinstance(t, dict) and t.get("role") in ("user", "agent") and isinstance(t.get("text"), str)
+            for t in value):
+        raise ValueError("history must be a list of {role: 'user' | 'agent', text: string}")
+    return [{"role": t["role"], "text": t["text"][:MAX_TURN_CHARS]} for t in value[-MAX_HISTORY_TURNS:]]
+
 
 @dataclass
 class CodingRequest:
@@ -78,6 +94,12 @@ class CodingRequest:
     # Where the generated code must run, e.g. "Windows 11, Python 3.12". Empty: the
     # CODING_AGENT_TARGET_ENVIRONMENT setting, else the machine running the agent.
     target_environment: str = ""
+    # The chat before this task ({role: "user" | "agent", text}, oldest first), so "fix it" can be
+    # understood. Every specialist and the Director see its last turns; it is not recorded anywhere.
+    history: list[dict[str, str]] = field(default_factory=list)
+    # Rounds the Debugging Specialist gets to fix what the files gate or the test run found before the
+    # run fails (0 to MAX_REPAIR_ROUNDS). None: the agent's setting (2, or the CLI's --max-repairs).
+    max_repairs: int | None = None
 
     def __post_init__(self) -> None:
         if not self.task or not self.task.strip():
@@ -86,6 +108,10 @@ class CodingRequest:
             raise ValueError("workspace must not be empty")
         if self.mode not in ("propose", "apply"):
             raise ValueError("mode must be 'propose' or 'apply'")
+        if self.max_repairs is not None and (
+                isinstance(self.max_repairs, bool) or not isinstance(self.max_repairs, int)
+                or not 0 <= self.max_repairs <= MAX_REPAIR_ROUNDS):
+            raise ValueError(f"max_repairs must be an integer from 0 to {MAX_REPAIR_ROUNDS}")
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "CodingRequest":
@@ -94,7 +120,8 @@ class CodingRequest:
             raise ValueError("request body must be a JSON object")
         allowed = {
             "task", "workspace", "constraints", "acceptance_criteria", "mode",
-            "requested_roles", "max_team_size", "fix_review_findings", "target_environment",
+            "requested_roles", "max_team_size", "fix_review_findings", "target_environment", "history",
+            "max_repairs",
         }
         unknown = set(payload) - allowed
         if unknown:
@@ -119,6 +146,8 @@ class CodingRequest:
             max_team_size=max_team,
             fix_review_findings=bool(payload.get("fix_review_findings", False)),
             target_environment=str(payload.get("target_environment") or ""),
+            history=parse_history(payload.get("history")),
+            max_repairs=payload.get("max_repairs"),  # checked in __post_init__
         )
 
 

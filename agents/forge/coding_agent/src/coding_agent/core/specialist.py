@@ -30,7 +30,7 @@ from .projectdocs import facts_for_files, requirements
 from .projectfacts import ProjectView
 from .prompts import (
     ANSWER_SCHEMA, ASK_INSTRUCTIONS, SCHEMA_BY_KIND, TEST_PLAN_INSTRUCTIONS, TEST_PLAN_SCHEMA, WORK_ITEMS_SCHEMA,
-    system_prompt,
+    conversation_md, system_prompt,
 )
 from .pyinterface import signatures
 from .registry import RoleSpec, Tree
@@ -53,7 +53,7 @@ def _str_list(value: Any) -> list[str]:
 
 
 def request_md(request: CodingRequest) -> str:
-    parts = [f"# Task\n{request.task.strip()}"]
+    parts = [f"# Task\n{request.task.strip()}", conversation_md(request.history)]
     if request.target_environment:
         parts.append(f"## Target environment\n{request.target_environment}. The code must run there: use only "
                      "modules and APIs available on this platform unless the task says otherwise.")
@@ -61,7 +61,7 @@ def request_md(request: CodingRequest) -> str:
         parts.append("## Constraints\n" + "\n".join(f"- {c}" for c in request.constraints))
     if request.acceptance_criteria:
         parts.append("## Acceptance criteria\n" + "\n".join(f"- {c}" for c in request.acceptance_criteria))
-    return "\n\n".join(parts)
+    return "\n\n".join(p for p in parts if p)
 
 
 def unit_context_md(role: RoleSpec, tree: Tree) -> str:
@@ -382,7 +382,11 @@ class Specialist:
 
     def _repair_call(self, request: CodingRequest, problems: list[dict[str, str]], changes: ChangeSet,
                      board: Blackboard, others: int = 0) -> dict[str, Any]:
-        listing = "\n".join(f"- {p['path']} [{p['check']}]: {p['detail']}" for p in problems)
+        listing = "\n".join(
+            f"- {p['path']} [{p['check']}]"
+            + (f" STILL FAILING {p['repeated']}: the change made then did not fix it. Change the code the error "
+               "points at; a comment changes nothing" if p.get("repeated") else "")
+            + f": {p['detail']}" for p in problems)
         files = sorted({p["path"] for p in problems})
         note = (f"\n\nIn THIS response write only {', '.join(files)}, completely. {others} problem(s) in other "
                 "files are fixed in separate responses." if others else "")

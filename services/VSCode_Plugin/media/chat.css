@@ -142,6 +142,8 @@ code, pre { font-family: var(--mono); font-size: 0.92em; }
   font-size: 0.9em;
   margin-bottom: 4px;
 }
+.msg.user .meta .edit { color: var(--muted); word-break: normal; }
+.msg.user .meta .edit:hover, .msg.user .meta .edit:focus-visible { color: var(--vscode-textLink-foreground); }
 .msg .text, .msg .task { white-space: pre-wrap; }
 .msg .task {
   display: -webkit-box;
@@ -370,3 +372,19 @@ button.chip.link:hover { background: var(--vscode-list-hoverBackground); }
   gap: 8px;
 }
 .hint { color: var(--muted); font-size: 0.88em; }
+
+/* -------------------------------------------------------------- editor tab */
+/* In an editor tab, full screen or in its own window, the chat can be very wide: the text keeps a
+   readable column in the middle, and the scroll bar stays at the edge. */
+body[data-surface="editor"] { background: var(--vscode-editor-background); }
+body[data-surface="editor"] .msg.agent {
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+}
+body[data-surface="editor"] .header,
+body[data-surface="editor"] .server,
+body[data-surface="editor"] .messages,
+body[data-surface="editor"] .composer {
+  padding-left: max(var(--gap), calc((100% - 920px) / 2));
+  padding-right: max(var(--gap), calc((100% - 920px) / 2));
+}
+body[data-surface="editor"] .timeline { max-height: 50vh; }

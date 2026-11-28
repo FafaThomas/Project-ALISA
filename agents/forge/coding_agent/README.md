@@ -182,7 +182,8 @@ When a call is not sent or still fails, that one call goes to a fallback:
 
 1. `FORGE_GEMINI_FALLBACK_MODEL`, when it's set to a different hosted model
    (for example `@general`, so `gemini-2.5-flash` out of quota tries
-   `gemini-3.5-flash-lite` next).
+   `gemini-3.5-flash-lite` next). With a prefix it can be another provider's
+   model, e.g. `FORGE_OPENAI_FALLBACK_MODEL=gemini:@general`.
 2. Otherwise, or if that fails too, the unit's role-type default on Ollama.
 
 Each step is tried once, so it can't loop. The output's model source then says why, e.g.
@@ -200,6 +201,55 @@ agent makes single structured calls.
 tier: the Director, architects and division leads. Developers and the
 Debugging Specialist make a call per file plus repairs, so they would use up a
 20-requests-per-day model in two or three runs.
+
+### OpenAI-compatible models
+
+`openai:<model>` sends a unit to OpenAI's Chat Completions API, or to any server
+that speaks it: OpenRouter, DeepSeek, Groq, or a local LM Studio or vLLM server
+(set `OPENAI_API_BASE`). Named models and fallbacks work as for Gemini:
+
+```ini
+OPENAI_API_KEY=<your key>
+FORGE_OPENAI_REASONING_MODEL=gpt-6.2-astra     # decisions and debugging
+FORGE_OPENAI_GENERAL_MODEL=gpt-6.2-sol         # analysis and reviews
+FORGE_OPENAI_FALLBACK_MODEL=gemini:@general    # OpenAI failing: Gemini, then local
+
+FORGE_CODING_AGENT_LEADERSHIP_MODEL=openai:@reasoning
+FORGE_CODING_AGENT_QUALITY_DEBUGGING_SPECIALIST_MODEL=openai:@reasoning
+FORGE_CODING_AGENT_QUALITY_QA_LEAD_MODEL=openai:@general
+```
+
+- **Why these roles:** with small local models, the developers wrote what they
+  were told, but planning and debugging went wrong. The plans didn't fit
+  together, and repairs left the error in place. Those calls are few, and
+  they decide what the developers build, so they're where a stronger model pays
+  off most. Developers can stay local.
+- **Structured replies:** the agent's JSON Schema goes in `response_format`
+  (`json_schema`, not strict, because strict mode needs every field required).
+  Models and servers differ, so the client adapts once per model and remembers it:
+  - a parameter the model refuses (`temperature` on reasoning models,
+    `reasoning_effort` on others) is dropped;
+  - without `json_schema` support it uses `json_object`, with the schema in the
+    system message;
+  - without `response_format` support the reply is parsed as text.
+- **Errors and fallback:** overloads and timeouts are retried
+  `OPENAI_RETRIES` times (default 2). A rate limit asking for 20 s or less is
+  waited out, and a longer one benches the model. These go to the fallback:
+  - a missing or rejected key (401/403)
+  - a model the key can't use (404)
+  - a spent balance (`insufficient_quota`)
+  - a longer rate limit
+  - a persistent failure
+
+  The report says which model answered and why.
+- **Settings:** `OPENAI_TIMEOUT` (default 300 s, because reasoning models think
+  first), `OPENAI_REASONING_EFFORT` (e.g. `high`, sent as `reasoning_effort`;
+  unset uses the model's default), `OPENAI_MAX_OUTPUT_TOKENS` (unset uses the
+  model's limit), and `OPENAI_QUOTA_<MODEL>` limits like Gemini's.
+- **A local server needs no key:** with `OPENAI_API_BASE` set to another
+  address, calls go out without one.
+- **Privacy:** like Gemini, anything these units see, including project code,
+  is sent to the provider.
 
 ### Thinking and temperature
 
@@ -331,6 +381,38 @@ coding-agent serve --allow-root D:\work --unit development/database_developer --
 
 The [VS Code extension](../../../services/VSCode_Plugin/README.md) is a client of these endpoints.
 
+### Runs
+
+`POST /runs` takes a request:
+
+```
+{task, workspace, mode?, constraints?, acceptance_criteria?, requested_roles?, max_team_size?,
+ max_repairs?, fix_review_findings?, target_environment?, history?}
+```
+
+`max_repairs` is how many rounds the Debugging Specialist gets to fix the problems the files gate or
+the test run found. The run fails only after the last round. It can be 0 to 10. Without it, the run
+gets the agent's setting: 2, or `--max-repairs` on the command line.
+
+- **Each round costs** one model call, then the files gate and the test run again.
+- **The progress shows the limit:** a repair round's `role_started` event has `attempt` and
+  `max_attempts`.
+- **It goes with the request** when one unit delegates to another.
+
+`history` is the chat before the task, oldest first. Its turns look like the ones questions take
+(`{role: "user" | "agent", text}`).
+
+- **Why:** a follow-up like "lets fix it" can only be understood with the chat before it. Failed runs
+  aren't in the run memory, so without the chat the team wouldn't know what "it" is.
+- **Who sees it:** the Director (when picking the team) and every specialist on the run.
+- **How much they see:** the chat appears under the task, as "Conversation before this task". It
+  holds up to 6 turns of at most 2,000 characters each, and about 6,000 characters in total. When it
+  is longer, the newest turns are kept.
+- **Not recorded:** the CHANGELOG, the project brief, the run memory and `report.json` keep only the
+  task.
+
+When one unit delegates to another, the history goes with the request.
+
 ### Questions
 
 `POST /ask` with `{question, workspace, history?, focus_files?}` gets an answer about the workspace
@@ -442,6 +524,10 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
   tries to change owned files, the rejections show up as one warning, not one per file.
 - **Backup folders are ignored.** Folders named `*.bak`, `*.old`, `*.orig`, `*.backup`, `backup`,
   `backups` or `old` are not read as project files, nor copied into the test run.
+- **Python environments are ignored, whatever their name.** A folder with `pyvenv.cfg` (any
+  virtualenv, e.g. `snake-game-venv`), one with `conda-meta/`, and `site-packages` folders are
+  installed packages, not the project. Without this, the files gate asked `requirements.txt` to list
+  pip's own imports, and the environment's files pushed the project's out of the file list.
 - **The files gate** is the only blocking check. It requires that:
   - every assigned file is produced
   - Python compiles
@@ -530,6 +616,42 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
     skipped. A command that times out after printing that it started serving ("Starting development
     server", "Listening on" and similar) counts as "needs a server", not a hang. On a timeout, the
     command and every process it started are stopped, including Django's autoreload child.
+  - **Games and UIs:** a program built on a game or UI library (pygame, pyglet, arcade, tkinter,
+    curses, Qt, Kivy, Textual and others) waits for its user, so it never exits by itself. If it is
+    still running at the timeout with no traceback, it started fine and shows as `n/a`. The library
+    can be imported by the script or by a project module it imports, up to three imports away.
+    - **Why:** reported as a hang, it went to repair, and the only way to "fix" that was to make the
+      program quit by itself. In a real run, the repairs made a snake game close at game over, after
+      500 steps, and as soon as it noticed the test run.
+    - **No window:** SDL programs such as pygame run with `SDL_VIDEODRIVER` and `SDL_AUDIODRIVER` set
+      to `dummy`. Nothing appears on your screen and no sound plays, and the game logic still runs.
+      With no input, a snake hits the wall within seconds, so the game-over path runs too.
+    - **Closing by itself is a bug.** A game or UI started with no arguments, whose code waits for
+      input (`pygame.event.get()`, `mainloop()`, `getch()` and similar), must not end with no input
+      given. If it does, it would close on its user too, so it goes to repair as "this pygame program
+      closed on its own after 0.1s", or "stopped with exit code N". The problem says what to look for:
+      code that ends it at game over, after a number of steps or frames, or when it detects a test or
+      headless environment.
+      - **Why a check:** the instruction below wasn't enough. A small model left a "headless" check in
+        place, and the game exited at once in the test run. Two runs "passed" with a game that closed at
+        game over.
+      - **Left alone:** commands with arguments (`--help` may end), and programs with no event loop (a
+        script that uses pygame to render an image and exit). Nothing is pushed to run forever when it
+        shouldn't.
+      - **Errors hidden by a catch-all:** generated games often wrap everything in
+        `except Exception as e: print(...)`. They then print "An unexpected error occurred: 'bool'
+        object is not callable", close "gracefully", and show no traceback. So the test run runs a
+        game that closed on its own once more, with Python 3.12's `sys.monitoring` watching for
+        exceptions caught in project files. It adds the traceback of the last one to the problem, and
+        points the problem at the file where it was raised, not at the catch-all. Python's own
+        internals and `ImportError` (optional imports) don't count.
+        - **Why:** in a real run, two files of a doom-style game disagreed: one called
+          `is_quit_requested()`, while the other defined it as a True/False attribute. The repair
+          rounds only saw the message, never `game_loop.py, line 53`.
+    - **The rule for the team:** developers and the Debugging Specialist are told never to change what
+      a program does for its users to get past a check. That means no quitting by itself, no step or
+      time limits, and no special case for a test or headless environment. They are also told to remove
+      such code when they find it.
   - **Failures:** these go back for repair, like a gate failure:
     - a command that hangs (`CODING_AGENT_TEST_TIMEOUT`, default 20 s)
     - a command that ends in a Python traceback
@@ -552,6 +674,11 @@ analyze -> plan -> design -> build -> files gate + repair -> review -> (optional
     - stdin is closed.
     - No API keys or tokens are passed in.
     - Home and temp folders point inside the copy, which is deleted afterwards.
+  - **The same failure again:** when a problem is still there after a repair round, with the same
+    file, check and error, the next round's problem list marks it "STILL FAILING after repair round
+    N". The model is told its change didn't fix it and that a comment changes nothing. In a real run,
+    a small model added a `# FIX:` comment above a failing line three rounds in a row and left the
+    line as it was.
   - **After repairs:** failures that are still there become warnings and the files are still
     written, because a planned command can itself be wrong. Set `CODING_AGENT_TEST_RUN=block` to
     refuse writing instead, or `off` to skip the test run.
@@ -662,6 +789,9 @@ coding-agent serve --allow-root D:\work --unit postgres_developer --port 8801
 | `GEMINI_QUOTA_<MODEL>` | `rpm,tpm,rpd` limits for quota-aware routing |
 | `GEMINI_TIMEOUT`, `GEMINI_RETRIES`, `GEMINI_MAX_WAIT` | Gemini request timeout (default 120 s), retries on overload (default 2), longest wait for a per-minute slot (default 15 s) |
 | `GEMINI_USAGE_FILE` | where per-day Gemini usage is saved (default `~/.alisa/forge/gemini_usage.json`) |
+| `OPENAI_API_KEY`, `OPENAI_API_BASE` | OpenAI-compatible access (only needed when a unit uses `openai:`); the base defaults to `https://api.openai.com/v1` |
+| `FORGE_OPENAI_<NAME>_MODEL`, `FORGE_OPENAI_FALLBACK_MODEL` | named models, used as `openai:@<name>`; the hosted fallback, which may be another provider's (`gemini:@general`) |
+| `OPENAI_TIMEOUT`, `OPENAI_RETRIES`, `OPENAI_REASONING_EFFORT`, `OPENAI_MAX_OUTPUT_TOKENS`, `OPENAI_QUOTA_<MODEL>` | request timeout (default 300 s), retries (default 2), `reasoning_effort` to send, output cap, `rpm,tpm,rpd` limits |
 | `CODING_AGENT_API_TOKEN` | bearer token for services and for calls to remote units |
 | `CODING_AGENT_REMOTE_TIMEOUT` | seconds to wait for a remote unit (default 3600) |
 

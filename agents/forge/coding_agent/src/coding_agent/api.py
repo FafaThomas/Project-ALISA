@@ -41,7 +41,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .agent import CodingAgent, Unit
-from .core.models import CodingRequest, InvocationContext, InvocationSource
+from .core.models import CodingRequest, InvocationContext, InvocationSource, parse_history
 from .core.units import handle_invoke, load_proposal, proposal_conflicts
 from .core.workspace import Workspace
 
@@ -49,8 +49,6 @@ LOGGER = logging.getLogger(__name__)
 MAX_BODY_BYTES = 8_000_000  # /invoke carries proposed file contents
 ASK_FIELDS = frozenset({"question", "workspace", "history", "focus_files"})
 MAX_QUESTION_CHARS = 20_000
-MAX_HISTORY_TURNS = 20
-MAX_TURN_CHARS = 4_000
 MAX_FOCUS_FILES = 10
 
 
@@ -153,18 +151,13 @@ class CodingAgentService:
             raise ValueError("question must not be empty")
         if len(question) > MAX_QUESTION_CHARS:
             raise ValueError(f"question is longer than {MAX_QUESTION_CHARS} characters")
-        history = payload.get("history") or []
-        if not isinstance(history, list) or not all(
-                isinstance(t, dict) and t.get("role") in ("user", "agent") and isinstance(t.get("text"), str)
-                for t in history):
-            raise ValueError("history must be a list of {role: 'user' | 'agent', text: string}")
+        history = parse_history(payload.get("history"))
         focus = payload.get("focus_files") or []
         if not isinstance(focus, list) or not all(isinstance(f, str) for f in focus):
             raise ValueError("focus_files must be a list of strings")
         return AskRequest(
             question=question, workspace=self._check_workspace(str(payload.get("workspace") or "")),
-            history=[{"role": t["role"], "text": t["text"][:MAX_TURN_CHARS]} for t in history[-MAX_HISTORY_TURNS:]],
-            focus_files=focus[:MAX_FOCUS_FILES],
+            history=history, focus_files=focus[:MAX_FOCUS_FILES],
         )
 
     def resolve(self, ref: str | None) -> Unit:

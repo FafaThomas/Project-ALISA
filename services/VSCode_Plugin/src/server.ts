@@ -30,6 +30,15 @@ export class AgentServer implements vscode.Disposable {
   private stale = false; // settings or folders changed while jobs were running: restart when idle
   private readonly disposables: vscode.Disposable[] = [];
 
+  /** To the output channel. The service's last lines and its exit can come after VS Code closed it. */
+  private log(text: string): void {
+    try {
+      this.output.append(text);
+    } catch {
+      // the window is closing
+    }
+  }
+
   constructor(private readonly secrets: vscode.SecretStorage, readonly output: vscode.OutputChannel) {
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration((event) => {
@@ -98,7 +107,7 @@ export class AgentServer implements vscode.Disposable {
     this.current = undefined;
     this.stale = false;
     if (child) {
-      this.output.appendLine('[stopping the coding agent service]');
+      this.log('[stopping the coding agent service]\n');
       await killTree(child);
     }
     this.set({ state: 'stopped', managed: this.value.managed, url: '', message: 'Stopped' });
@@ -162,7 +171,7 @@ export class AgentServer implements vscode.Disposable {
     const command = (config.get<string>('command') ?? '').trim() || 'coding-agent';
     const args = serveArgs(config.get<string[]>('args') ?? [], roots, port);
     this.set({ state: 'starting', managed: true, url, message: 'Starting the coding agent service' });
-    this.output.appendLine(`> ${command} ${args.join(' ')}`);
+    this.log(`> ${command} ${args.join(' ')}\n`);
 
     const child: cp.ChildProcess = spawnService(command, args, roots[0], token);
     this.child = child;
@@ -170,7 +179,7 @@ export class AgentServer implements vscode.Disposable {
     const recent: string[] = [];
     const log = (chunk: Buffer) => {
       const text = chunk.toString('utf8');
-      this.output.append(text);
+      this.log(text);
       recent.push(...text.split(/\r?\n/).filter((line) => line.trim()));
       recent.splice(0, Math.max(0, recent.length - 12));
     };
@@ -179,10 +188,10 @@ export class AgentServer implements vscode.Disposable {
     let failure: string | undefined;
     child.on('error', (error) => {
       failure = spawnProblem(command, error);
-      this.output.appendLine(failure);
+      this.log(`${failure}\n`);
     });
     child.on('exit', (code, signal) => {
-      this.output.appendLine(`[coding agent service exited: ${signal ?? code}]`);
+      this.log(`[coding agent service exited: ${signal ?? code}]\n`);
       failure ??= `The service exited (${signal ?? code})${recent.length ? `: ${recent.slice(-3).join(' | ')}` : ''}`;
       if (this.child === child) { // not a stop we asked for
         this.child = undefined;

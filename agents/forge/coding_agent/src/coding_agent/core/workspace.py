@@ -27,6 +27,18 @@ def is_ignored_dir(name: str) -> bool:
     return name in IGNORED_DIRS or lower in BACKUP_DIR_NAMES or lower.endswith(BACKUP_DIR_SUFFIXES)
 
 
+# Installed packages, not the project's code. A virtual environment can have any name ("snake-game-venv"),
+# but it always has pyvenv.cfg at its root (PEP 405); a conda environment has conda-meta/. Reading one
+# as the project makes the files gate demand that requirements.txt lists pip's own imports, and its
+# thousands of files crowd the project's out of the file list.
+ENVIRONMENT_MARKERS = ("pyvenv.cfg", "conda-meta")
+PACKAGE_DIR_NAMES = frozenset({"site-packages", "dist-packages"})
+
+
+def is_environment_dir(path: Path) -> bool:
+    return path.name.lower() in PACKAGE_DIR_NAMES or any((path / marker).exists() for marker in ENVIRONMENT_MARKERS)
+
+
 SECRET_NAMES = frozenset({".env", "id_rsa", "id_ed25519", "credentials.json", "secrets.json"})
 SECRET_SUFFIXES = (".pem", ".key", ".pfx", ".p12")
 MAX_READ_BYTES = 400_000
@@ -118,7 +130,7 @@ class Workspace:
                 continue
             for entry in entries:
                 if entry.is_dir():
-                    if not is_ignored_dir(entry.name):
+                    if not is_ignored_dir(entry.name) and not is_environment_dir(entry):
                         stack.append(entry)
                 elif entry.is_file():
                     rel = PurePosixPath(entry.relative_to(self.root).as_posix())

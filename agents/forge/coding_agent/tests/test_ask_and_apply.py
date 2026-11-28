@@ -115,6 +115,45 @@ def test_ask_about_a_missing_workspace_fails_cleanly(served):
     assert status == 200 and job["status"] == "failed" and "does not exist" in job["error"]
 
 
+# ----------------------------------------------------------- run history
+def test_a_run_sees_the_chat_before_its_task(served):
+    base, root, llm = served
+    workspace = root / "follow-up"
+    status, job = call(f"{base}/runs?wait=true", "POST", {
+        "task": "lets fix it", "workspace": str(workspace), "mode": "propose",
+        "history": [{"role": "user", "text": "Build a calculator CLI in Python"},
+                    {"role": "agent", "text": "Code run: failed. Files gate problems: calculator.py RUN_HISTORY_MARKER"}],
+    })
+    assert status == 200 and job["status"] == "proposed", job
+    # Every model call of the run, the Director's team pick included, knows what "it" is.
+    assert len(llm.calls) > 3
+    for made in llm.calls:
+        assert "RUN_HISTORY_MARKER" in made["prompt"], made["role"]
+        assert made["prompt"].index("lets fix it") < made["prompt"].index("RUN_HISTORY_MARKER")
+    # The chat informs the run; it is not recorded with it.
+    assert "RUN_HISTORY_MARKER" not in json.dumps(job["report"])
+    assert "RUN_HISTORY_MARKER" not in (Path(job["report"]["artifacts_dir"]) / "report.json").read_text(encoding="utf-8")
+
+    bad = {"task": "x", "workspace": str(workspace), "history": [{"role": "system", "text": "x"}]}
+    assert call(f"{base}/runs", "POST", bad)[0] == 400
+
+
+def test_run_history_is_bounded_and_survives_delegation():
+    from coding_agent.core.models import CodingRequest, request_to_dict
+    from coding_agent.core.prompts import RUN_HISTORY_CHARS, RUN_TURN_CHARS, conversation_md
+
+    turns = [{"role": "user" if i % 2 == 0 else "agent", "text": f"turn {i} " + "x" * 5_000} for i in range(30)]
+    request = CodingRequest.from_payload({"task": "again", "workspace": "D:/w", "history": turns})
+    assert len(request.history) == 20 and request.history[-1]["text"].startswith("turn 29")
+    rendered = conversation_md(request.history)
+    assert "turn 29" in rendered and "turn 28" in rendered and "turn 20" not in rendered
+    assert len(rendered) < RUN_HISTORY_CHARS + 2 * RUN_TURN_CHARS
+    assert rendered.index("turn 28") < rendered.index("turn 29")  # oldest first
+    assert conversation_md([]) == ""
+    # A unit delegating to another sends the request as a dict; the chat goes with it.
+    assert CodingRequest.from_payload(request_to_dict(request)).history == request.history
+
+
 # ---------------------------------------------------------------- apply
 def propose(base: str, workspace: Path) -> dict:
     status, job = call(f"{base}/runs?wait=true", "POST", {
